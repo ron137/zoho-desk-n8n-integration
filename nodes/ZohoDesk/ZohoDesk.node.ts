@@ -4,6 +4,8 @@ import {
 	INodeType,
 	INodeTypeDescription,
 	IDataObject,
+	ILoadOptionsFunctions,
+	INodePropertyOptions,
 } from 'n8n-workflow';
 
 export class ZohoDesk implements INodeType {
@@ -68,9 +70,12 @@ export class ZohoDesk implements INodeType {
 			},
 			// Create Operation Fields
 			{
-				displayName: 'Department ID',
+				displayName: 'Department',
 				name: 'departmentId',
-				type: 'string',
+				type: 'options',
+				typeOptions: {
+					loadOptionsMethod: 'getDepartments',
+				},
 				required: true,
 				displayOptions: {
 					show: {
@@ -79,21 +84,7 @@ export class ZohoDesk implements INodeType {
 					},
 				},
 				default: '',
-				description: 'The ID of the department to which the ticket belongs',
-			},
-			{
-				displayName: 'Contact ID',
-				name: 'contactId',
-				type: 'string',
-				required: true,
-				displayOptions: {
-					show: {
-						resource: ['ticket'],
-						operation: ['create'],
-					},
-				},
-				default: '',
-				description: 'The ID of the contact who raised the ticket',
+				description: 'The department to which the ticket belongs',
 			},
 			{
 				displayName: 'Subject',
@@ -110,6 +101,65 @@ export class ZohoDesk implements INodeType {
 				description: 'Subject of the ticket',
 			},
 			{
+				displayName: 'Contact',
+				name: 'contact',
+				type: 'fixedCollection',
+				typeOptions: {
+					multipleValues: false,
+				},
+				displayOptions: {
+					show: {
+						resource: ['ticket'],
+						operation: ['create'],
+					},
+				},
+				default: {},
+				description: 'Details of the contact who raised the ticket. If email exists, contactId is used; otherwise, a new contact is created. Either lastName or email must be present.',
+				options: [
+					{
+						name: 'contactValues',
+						displayName: 'Contact Details',
+						values: [
+							{
+								displayName: 'Email',
+								name: 'email',
+								type: 'string',
+								default: '',
+								description: 'Email address of the contact (required if lastName is not provided)',
+							},
+							{
+								displayName: 'Last Name',
+								name: 'lastName',
+								type: 'string',
+								default: '',
+								description: 'Last name of the contact (required if email is not provided)',
+							},
+							{
+								displayName: 'First Name',
+								name: 'firstName',
+								type: 'string',
+								default: '',
+								description: 'First name of the contact',
+							},
+							{
+								displayName: 'Phone',
+								name: 'phone',
+								type: 'string',
+								default: '',
+								description: 'Phone number of the contact',
+							},
+							{
+								displayName: 'Mobile',
+								name: 'mobile',
+								type: 'string',
+								default: '',
+								description: 'Mobile number of the contact',
+							},
+						],
+					},
+				],
+			},
+			{
 				displayName: 'Additional Fields',
 				name: 'additionalFields',
 				type: 'collection',
@@ -122,6 +172,69 @@ export class ZohoDesk implements INodeType {
 					},
 				},
 				options: [
+					{
+						displayName: 'Description',
+						name: 'description',
+						type: 'string',
+						typeOptions: {
+							rows: 5,
+						},
+						default: '',
+						description: 'Description of the ticket',
+					},
+					{
+						displayName: 'Due Date',
+						name: 'dueDate',
+						type: 'dateTime',
+						default: '',
+						description: 'The due date for resolving the ticket',
+					},
+					{
+						displayName: 'Priority',
+						name: 'priority',
+						type: 'options',
+						options: [
+							{
+								name: 'Low',
+								value: 'Low',
+							},
+							{
+								name: 'Medium',
+								value: 'Medium',
+							},
+							{
+								name: 'High',
+								value: 'High',
+							},
+						],
+						default: 'Medium',
+						description: 'Priority of the ticket',
+					},
+					{
+						displayName: 'Secondary Contacts',
+						name: 'secondaryContacts',
+						type: 'string',
+						default: '',
+						description: 'Comma-separated list of contact IDs for secondary contacts',
+					},
+					{
+						displayName: 'Team',
+						name: 'teamId',
+						type: 'options',
+						typeOptions: {
+							loadOptionsMethod: 'getTeams',
+							loadOptionsDependsOn: ['departmentId'],
+						},
+						default: '',
+						description: 'The team assigned to the ticket',
+					},
+					{
+						displayName: 'Custom Fields',
+						name: 'cf',
+						type: 'json',
+						default: '{}',
+						description: 'Custom fields as JSON object (e.g., {"cf_modelname": "F3 2017", "cf_phone": "123456"})',
+					},
 					{
 						displayName: 'Account ID',
 						name: 'accountId',
@@ -192,23 +305,6 @@ export class ZohoDesk implements INodeType {
 						description: 'Classification of the ticket',
 					},
 					{
-						displayName: 'Description',
-						name: 'description',
-						type: 'string',
-						typeOptions: {
-							rows: 5,
-						},
-						default: '',
-						description: 'Description of the ticket',
-					},
-					{
-						displayName: 'Due Date',
-						name: 'dueDate',
-						type: 'dateTime',
-						default: '',
-						description: 'The due date for resolving the ticket',
-					},
-					{
 						displayName: 'Email',
 						name: 'email',
 						type: 'string',
@@ -228,27 +324,6 @@ export class ZohoDesk implements INodeType {
 						type: 'string',
 						default: '',
 						description: 'Phone number of the contact',
-					},
-					{
-						displayName: 'Priority',
-						name: 'priority',
-						type: 'options',
-						options: [
-							{
-								name: 'Low',
-								value: 'Low',
-							},
-							{
-								name: 'Medium',
-								value: 'Medium',
-							},
-							{
-								name: 'High',
-								value: 'High',
-							},
-						],
-						default: 'Medium',
-						description: 'Priority of the ticket',
 					},
 					{
 						displayName: 'Product ID',
@@ -288,13 +363,6 @@ export class ZohoDesk implements INodeType {
 						default: '',
 						description: 'Comma-separated list of tags associated with the ticket',
 					},
-					{
-						displayName: 'Team ID',
-						name: 'teamId',
-						type: 'string',
-						default: '',
-						description: 'The ID of the team assigned to the ticket',
-					},
 				],
 			},
 			// Update Operation Fields
@@ -325,6 +393,58 @@ export class ZohoDesk implements INodeType {
 					},
 				},
 				options: [
+					{
+						displayName: 'Description',
+						name: 'description',
+						type: 'string',
+						typeOptions: {
+							rows: 5,
+						},
+						default: '',
+						description: 'Description of the ticket',
+					},
+					{
+						displayName: 'Due Date',
+						name: 'dueDate',
+						type: 'dateTime',
+						default: '',
+						description: 'The due date for resolving the ticket',
+					},
+					{
+						displayName: 'Priority',
+						name: 'priority',
+						type: 'options',
+						options: [
+							{
+								name: 'Low',
+								value: 'Low',
+							},
+							{
+								name: 'Medium',
+								value: 'Medium',
+							},
+							{
+								name: 'High',
+								value: 'High',
+							},
+						],
+						default: 'Medium',
+						description: 'Priority of the ticket',
+					},
+					{
+						displayName: 'Secondary Contacts',
+						name: 'secondaryContacts',
+						type: 'string',
+						default: '',
+						description: 'Comma-separated list of contact IDs for secondary contacts',
+					},
+					{
+						displayName: 'Custom Fields',
+						name: 'cf',
+						type: 'json',
+						default: '{}',
+						description: 'Custom fields as JSON object (e.g., {"cf_modelname": "F3 2017", "cf_phone": "123456"})',
+					},
 					{
 						displayName: 'Account ID',
 						name: 'accountId',
@@ -402,28 +522,14 @@ export class ZohoDesk implements INodeType {
 						description: 'The ID of the contact who raised the ticket',
 					},
 					{
-						displayName: 'Department ID',
+						displayName: 'Department',
 						name: 'departmentId',
-						type: 'string',
-						default: '',
-						description: 'The ID of the department to which the ticket belongs',
-					},
-					{
-						displayName: 'Description',
-						name: 'description',
-						type: 'string',
+						type: 'options',
 						typeOptions: {
-							rows: 5,
+							loadOptionsMethod: 'getDepartments',
 						},
 						default: '',
-						description: 'Description of the ticket',
-					},
-					{
-						displayName: 'Due Date',
-						name: 'dueDate',
-						type: 'dateTime',
-						default: '',
-						description: 'The due date for resolving the ticket',
+						description: 'The department to which the ticket belongs',
 					},
 					{
 						displayName: 'Email',
@@ -445,27 +551,6 @@ export class ZohoDesk implements INodeType {
 						type: 'string',
 						default: '',
 						description: 'Phone number of the contact',
-					},
-					{
-						displayName: 'Priority',
-						name: 'priority',
-						type: 'options',
-						options: [
-							{
-								name: 'Low',
-								value: 'Low',
-							},
-							{
-								name: 'Medium',
-								value: 'Medium',
-							},
-							{
-								name: 'High',
-								value: 'High',
-							},
-						],
-						default: 'Medium',
-						description: 'Priority of the ticket',
 					},
 					{
 						displayName: 'Product ID',
@@ -513,15 +598,78 @@ export class ZohoDesk implements INodeType {
 						description: 'Comma-separated list of tags associated with the ticket',
 					},
 					{
-						displayName: 'Team ID',
+						displayName: 'Team',
 						name: 'teamId',
-						type: 'string',
+						type: 'options',
+						typeOptions: {
+							loadOptionsMethod: 'getTeams',
+							loadOptionsDependsOn: ['departmentId'],
+						},
 						default: '',
-						description: 'The ID of the team assigned to the ticket',
+						description: 'The team assigned to the ticket',
 					},
 				],
 			},
 		],
+	};
+
+	methods = {
+		loadOptions: {
+			async getDepartments(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				const credentials = await this.getCredentials('zohoDeskOAuth2Api');
+				const orgId = credentials.orgId as string;
+				const baseUrl = credentials.baseUrl || 'https://desk.zoho.com/api/v1';
+
+				const options = {
+					method: 'GET',
+					headers: {
+						'orgId': orgId,
+					},
+					uri: `${baseUrl}/departments`,
+					json: true,
+				};
+
+				const response = await this.helpers.requestOAuth2.call(this, 'zohoDeskOAuth2Api', options);
+
+				const departments = response.data || [];
+				return departments.map((department: any) => ({
+					name: department.name,
+					value: department.id,
+				}));
+			},
+
+			async getTeams(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				const credentials = await this.getCredentials('zohoDeskOAuth2Api');
+				const orgId = credentials.orgId as string;
+				const baseUrl = credentials.baseUrl || 'https://desk.zoho.com/api/v1';
+				const departmentId = this.getCurrentNodeParameter('departmentId') as string;
+
+				if (!departmentId) {
+					return [];
+				}
+
+				const options = {
+					method: 'GET',
+					headers: {
+						'orgId': orgId,
+					},
+					uri: `${baseUrl}/departments/${departmentId}/teams`,
+					json: true,
+				};
+
+				try {
+					const response = await this.helpers.requestOAuth2.call(this, 'zohoDeskOAuth2Api', options);
+					const teams = response.data || [];
+					return teams.map((team: any) => ({
+						name: team.name,
+						value: team.id,
+					}));
+				} catch (error) {
+					// If teams endpoint fails, return empty array
+					return [];
+				}
+			},
+		},
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
@@ -535,24 +683,64 @@ export class ZohoDesk implements INodeType {
 				if (resource === 'ticket') {
 					const credentials = await this.getCredentials('zohoDeskOAuth2Api');
 					const orgId = credentials.orgId as string;
-					
+
 					// Base URL from credentials or default
 					const baseUrl = credentials.baseUrl || 'https://desk.zoho.com/api/v1';
-					
+
 					if (operation === 'create') {
 						// Create ticket
 						const departmentId = this.getNodeParameter('departmentId', i) as string;
-						const contactId = this.getNodeParameter('contactId', i) as string;
 						const subject = this.getNodeParameter('subject', i) as string;
+						const contactData = this.getNodeParameter('contact', i) as IDataObject;
 						const additionalFields = this.getNodeParameter('additionalFields', i) as IDataObject;
 
 						const body: IDataObject = {
 							departmentId,
-							contactId,
 							subject,
 						};
 
-						// Add additional fields
+						// Handle contact object
+						if (contactData && contactData.contactValues) {
+							const contactValues = contactData.contactValues as IDataObject;
+							if (contactValues.email || contactValues.lastName) {
+								const contact: IDataObject = {};
+								if (contactValues.email) contact.email = contactValues.email;
+								if (contactValues.lastName) contact.lastName = contactValues.lastName;
+								if (contactValues.firstName) contact.firstName = contactValues.firstName;
+								if (contactValues.phone) contact.phone = contactValues.phone;
+								if (contactValues.mobile) contact.mobile = contactValues.mobile;
+								body.contact = contact;
+							}
+						}
+
+						// Add description, dueDate, priority, secondaryContacts at top level
+						if (additionalFields.description) {
+							body.description = additionalFields.description;
+						}
+						if (additionalFields.dueDate) {
+							body.dueDate = additionalFields.dueDate;
+						}
+						if (additionalFields.priority) {
+							body.priority = additionalFields.priority;
+						}
+						if (additionalFields.secondaryContacts) {
+							body.secondaryContacts = (additionalFields.secondaryContacts as string)
+								.split(',')
+								.map(id => id.trim());
+						}
+
+						// Add custom fields
+						if (additionalFields.cf) {
+							try {
+								body.cf = typeof additionalFields.cf === 'string'
+									? JSON.parse(additionalFields.cf as string)
+									: additionalFields.cf;
+							} catch (error) {
+								throw new Error('Custom fields must be valid JSON');
+							}
+						}
+
+						// Add other additional fields
 						if (additionalFields.accountId) {
 							body.accountId = additionalFields.accountId;
 						}
@@ -568,12 +756,6 @@ export class ZohoDesk implements INodeType {
 						if (additionalFields.classification) {
 							body.classification = additionalFields.classification;
 						}
-						if (additionalFields.description) {
-							body.description = additionalFields.description;
-						}
-						if (additionalFields.dueDate) {
-							body.dueDate = additionalFields.dueDate;
-						}
 						if (additionalFields.email) {
 							body.email = additionalFields.email;
 						}
@@ -582,9 +764,6 @@ export class ZohoDesk implements INodeType {
 						}
 						if (additionalFields.phone) {
 							body.phone = additionalFields.phone;
-						}
-						if (additionalFields.priority) {
-							body.priority = additionalFields.priority;
 						}
 						if (additionalFields.productId) {
 							body.productId = additionalFields.productId;
@@ -616,7 +795,7 @@ export class ZohoDesk implements INodeType {
 						};
 
 						const response = await this.helpers.requestOAuth2.call(this, 'zohoDeskOAuth2Api', options);
-						
+
 						returnData.push({
 							json: response,
 							pairedItem: { item: i },
@@ -630,7 +809,34 @@ export class ZohoDesk implements INodeType {
 
 						const body: IDataObject = {};
 
-						// Add update fields
+						// Add description, dueDate, priority, secondaryContacts
+						if (updateFields.description !== undefined) {
+							body.description = updateFields.description;
+						}
+						if (updateFields.dueDate !== undefined) {
+							body.dueDate = updateFields.dueDate;
+						}
+						if (updateFields.priority !== undefined) {
+							body.priority = updateFields.priority;
+						}
+						if (updateFields.secondaryContacts !== undefined) {
+							body.secondaryContacts = (updateFields.secondaryContacts as string)
+								.split(',')
+								.map(id => id.trim());
+						}
+
+						// Add custom fields
+						if (updateFields.cf !== undefined) {
+							try {
+								body.cf = typeof updateFields.cf === 'string'
+									? JSON.parse(updateFields.cf as string)
+									: updateFields.cf;
+							} catch (error) {
+								throw new Error('Custom fields must be valid JSON');
+							}
+						}
+
+						// Add other update fields
 						if (updateFields.accountId !== undefined) {
 							body.accountId = updateFields.accountId;
 						}
@@ -652,12 +858,6 @@ export class ZohoDesk implements INodeType {
 						if (updateFields.departmentId !== undefined) {
 							body.departmentId = updateFields.departmentId;
 						}
-						if (updateFields.description !== undefined) {
-							body.description = updateFields.description;
-						}
-						if (updateFields.dueDate !== undefined) {
-							body.dueDate = updateFields.dueDate;
-						}
 						if (updateFields.email !== undefined) {
 							body.email = updateFields.email;
 						}
@@ -666,9 +866,6 @@ export class ZohoDesk implements INodeType {
 						}
 						if (updateFields.phone !== undefined) {
 							body.phone = updateFields.phone;
-						}
-						if (updateFields.priority !== undefined) {
-							body.priority = updateFields.priority;
 						}
 						if (updateFields.productId !== undefined) {
 							body.productId = updateFields.productId;
@@ -703,7 +900,7 @@ export class ZohoDesk implements INodeType {
 						};
 
 						const response = await this.helpers.requestOAuth2.call(this, 'zohoDeskOAuth2Api', options);
-						
+
 						returnData.push({
 							json: response,
 							pairedItem: { item: i },

@@ -71,10 +71,24 @@ This package follows n8n's community node architecture:
 - Base API: `https://desk.zoho.{{$self["datacenter"]}}/api/v1`
 
 **Field Mapping**: The node uses two separate field collections:
-- `additionalFields` for create operation (departmentId, contactId, subject are required)
-- `updateFields` for update operation (ticketId is required)
+- **Create operation**: `departmentId` and `subject` are required. Contact details are optional (via `contact` fixed collection).
+- **Update operation**: `ticketId` is required, all other fields are optional via `updateFields`.
 
-Both operations support the same optional fields but with different parameter structures.
+Both operations support many optional fields including description, dueDate, priority, secondaryContacts, and custom fields (cf).
+
+**Dynamic Resource Loading**: The node uses `loadOptionsMethod` to fetch:
+- Departments list from `/departments` endpoint
+- Teams list from `/departments/{departmentId}/teams` endpoint (depends on selected department)
+
+**Contact Object Handling**: Instead of requiring a contactId, the create operation accepts a `contact` object with:
+- Email (required if lastName not provided)
+- Last Name (required if email not provided)
+- First Name, Phone, Mobile (optional)
+- If email exists in Zoho Desk, the existing contact is used; otherwise, a new contact is created
+
+**Custom Fields**: Both operations support a `cf` parameter for custom fields as JSON:
+- Input format: `{"cf_modelname": "F3 2017", "cf_phone": "123456"}`
+- Parsed and sent as JSON object to the API
 
 **OAuth2 Integration**: All API requests use `this.helpers.requestOAuth2.call(this, 'zohoDeskOAuth2Api', options)` which:
 - Automatically handles OAuth2 token refresh
@@ -90,10 +104,18 @@ Both operations support the same optional fields but with different parameter st
 - `orgId: {organizationId}` (must be included in every request)
 
 **Endpoints**:
+- GET `/departments` - List all departments (used for dropdown loading)
+- GET `/departments/{departmentId}/teams` - List teams for a department (used for dropdown loading)
 - POST `/tickets` - Create ticket
 - PATCH `/tickets/{ticketId}` - Update ticket
 
-**Tag Handling**: Tags are comma-separated strings in the UI but sent as arrays to the API (split and trimmed in execution)
+**Array Field Handling**:
+- **Tags**: Comma-separated strings in the UI, sent as arrays to the API (split and trimmed in execution)
+- **Secondary Contacts**: Comma-separated contact IDs in the UI, sent as arrays to the API
+
+**Required Fields**:
+- Create: `departmentId`, `subject` (contact object optional but email or lastName required if provided)
+- Update: `ticketId` only
 
 ## Important Conventions
 
