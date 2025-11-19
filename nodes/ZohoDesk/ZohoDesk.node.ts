@@ -190,8 +190,8 @@ function parseCustomFields(cf: unknown): IDataObject {
 		const sanitized: IDataObject = {};
 		for (const [key, value] of Object.entries(parsed)) {
 			if (typeof value === 'string') {
-				// Remove CRLF from custom field values (no length limit specified)
-				sanitized[key] = sanitizeCRLF(value, undefined, `Custom field "${key}"`);
+				// Validate length for custom field values (no length limit specified)
+				sanitized[key] = validateFieldLength(value, undefined, `Custom field "${key}"`);
 			} else if (value !== null && value !== undefined) {
 				// Keep non-string, non-null values as-is
 				sanitized[key] = value as string | number | boolean | IDataObject;
@@ -200,7 +200,7 @@ function parseCustomFields(cf: unknown): IDataObject {
 
 		return sanitized;
 	} catch (error) {
-		// Check if error is already a validation error from isPlainObject check or sanitizeCRLF
+		// Check if error is already a validation error from isPlainObject check or validateFieldLength
 		if (error instanceof Error && (
 			error.message.includes('Custom fields must be a JSON object') ||
 			error.message.includes('exceeds maximum length')
@@ -233,23 +233,22 @@ function addOptionalFields(
 ): void {
 	for (const field of fields) {
 		if (source[field] !== undefined) {
-			// Sanitize CRLF from string fields (XSS protection handled by Zoho Desk API)
+			// Validate length for string fields (XSS protection handled by Zoho Desk API)
 			if (typeof source[field] === 'string') {
 				const stringValue = source[field] as string;
+				// Capitalize field name once for all uses (avoid variable shadowing)
+				const fieldDisplayName = field.charAt(0).toUpperCase() + field.slice(1);
 
 				// Validate ID fields - empty strings are allowed (Zoho Desk API will ignore them)
 				if (field.endsWith('Id') && stringValue.trim() !== '') {
-					const fieldName = field.charAt(0).toUpperCase() + field.slice(1);
-					isValidZohoDeskId(stringValue, fieldName);
+					isValidZohoDeskId(stringValue, fieldDisplayName);
 				}
 
 				// Apply length limits from FIELD_LENGTH_LIMITS or use undefined for no limit
 				const maxLength = field in FIELD_LENGTH_LIMITS
 					? FIELD_LENGTH_LIMITS[field as keyof typeof FIELD_LENGTH_LIMITS]
 					: undefined;
-				// Capitalize field name for better error messages
-				const fieldName = field.charAt(0).toUpperCase() + field.slice(1);
-				body[field] = sanitizeCRLF(stringValue, maxLength, fieldName);
+				body[field] = validateFieldLength(stringValue, maxLength, fieldDisplayName);
 			} else {
 				body[field] = source[field];
 			}
@@ -305,38 +304,36 @@ function isValidZohoDeskId(id: string, fieldName: string): boolean {
 }
 
 /**
- * Sanitize CRLF characters from string input to prevent header injection attacks.
+ * Validate field length without modifying content
  *
- * IMPORTANT: This function replaces CRLF characters with spaces to preserve content length
- * and prevent data loss. For example:
- * - Input: "Line 1\nLine 2\nLine 3"
- * - Output: "Line 1 Line 2 Line 3"
+ * IMPORTANT: Does NOT sanitize CRLF characters because:
+ * - This node sends JSON request bodies, not HTTP headers
+ * - CRLF injection only affects HTTP headers (e.g., "Header: value\r\nInjected-Header: malicious")
+ * - In JSON bodies, newlines are safe and expected (e.g., multi-line descriptions)
+ * - JSON serialization automatically escapes newlines as \n in the wire format
+ * - Removing newlines breaks user-expected behavior for description and custom fields
  *
- * SECURITY NOTE: This function does NOT protect against XSS attacks. It only sanitizes
- * carriage return and line feed characters to prevent HTTP header injection.
+ * Example: "Line 1\nLine 2\nLine 3" → sent as-is → JSON serializes to "Line 1\\nLine 2\\nLine 3"
  *
- * Zoho Desk API is expected to handle HTML/JavaScript escaping server-side.
- * Input like '<script>alert(XSS)</script>' will pass through unchanged.
+ * SECURITY NOTE: Does NOT protect against XSS - handled by Zoho Desk API server-side.
+ * Input like '<script>alert(XSS)</script>' passes through unchanged (as expected).
  *
- * @param value - String value to process
+ * @param value - String value to validate
  * @param maxLength - Maximum allowed length (optional). Throws error if exceeded.
  * @param fieldName - Field name for error messages (optional, defaults to 'Field')
- * @returns String with CRLF characters replaced by spaces
+ * @returns Original string value unchanged (preserves newlines and formatting)
  * @throws Error if value exceeds maxLength
  */
-function sanitizeCRLF(value: string, maxLength?: number, fieldName?: string): string {
-	// Replace CRLF with spaces to prevent header injection while preserving formatting intent
-	const sanitized = value.replace(/[\r\n]/g, ' ');
-
+function validateFieldLength(value: string, maxLength?: number, fieldName?: string): string {
 	// Enforce length limit if specified - THROW ERROR instead of silent truncation
-	if (maxLength && sanitized.length > maxLength) {
+	if (maxLength && value.length > maxLength) {
 		throw new Error(
-			`${fieldName || 'Field'} exceeds maximum length of ${maxLength} characters (${sanitized.length} provided). ` +
+			`${fieldName || 'Field'} exceeds maximum length of ${maxLength} characters (${value.length} provided). ` +
 			'Please shorten your input and try again.',
 		);
 	}
 
-	return sanitized;
+	return value;
 }
 
 /**
@@ -366,7 +363,9 @@ function addContactField(
 	fieldLabel: string,
 	maxLength?: number,
 ): void {
-	if (!contactValues[fieldName]) return;
+	// Explicit null/undefined check - don't skip falsy values like 0 or empty string
+	// (empty strings are handled below after trimming)
+	if (contactValues[fieldName] === undefined || contactValues[fieldName] === null) return;
 
 	const fieldType = typeof contactValues[fieldName];
 	if (fieldType !== 'string' && fieldType !== 'number') {
@@ -381,7 +380,7 @@ function addContactField(
 	const fieldStr = String(contactValues[fieldName]).trim();
 	if (fieldStr !== '') {
 		// Sanitize CRLF characters (does NOT protect against XSS - handled by Zoho Desk API)
-		const cleaned = sanitizeCRLF(fieldStr, maxLength, `Contact ${fieldLabel}`);
+		const cleaned = validateFieldLength(fieldStr, maxLength, `Contact ${fieldLabel}`);
 
 		// Additional validation for email field
 		if (fieldName === 'email' && !isValidEmail(cleaned)) {
@@ -403,10 +402,10 @@ function addContactField(
  */
 function addCommonTicketFields(body: IDataObject, fields: IDataObject): void {
 	if (fields.description !== undefined) {
-		// Sanitize CRLF characters from description (XSS protection handled by Zoho Desk API)
+		// Validate length for description (XSS protection handled by Zoho Desk API)
 		// No length limit - let Zoho Desk API validate
 		body.description = typeof fields.description === 'string'
-			? sanitizeCRLF(fields.description, undefined, 'Description')
+			? validateFieldLength(fields.description, undefined, 'Description')
 			: fields.description;
 	}
 	if (fields.dueDate !== undefined) {
@@ -1163,9 +1162,9 @@ export class ZohoDesk implements INodeType {
 						const contactData = this.getNodeParameter('contact', i) as IDataObject;
 						const additionalFields = this.getNodeParameter('additionalFields', i) as IDataObject;
 
-						// Sanitize CRLF characters from subject (XSS protection handled by Zoho Desk API)
+						// Validate length for subject (XSS protection handled by Zoho Desk API)
 						// No length limit - let Zoho Desk API validate
-						const subject = sanitizeCRLF(rawSubject, undefined, 'Subject');
+						const subject = validateFieldLength(rawSubject, undefined, 'Subject');
 
 						const body: IDataObject = {
 							departmentId,
@@ -1233,7 +1232,7 @@ export class ZohoDesk implements INodeType {
 						// No length limit - let Zoho Desk API validate
 						if (additionalFields.tags && typeof additionalFields.tags === 'string') {
 							const tags = parseCommaSeparatedList(additionalFields.tags)
-								.map(tag => sanitizeCRLF(tag, undefined, 'Tag'));
+								.map(tag => validateFieldLength(tag, undefined, 'Tag'));
 							if (tags.length > 0) {
 								body.tags = tags;
 							}
@@ -1282,7 +1281,7 @@ export class ZohoDesk implements INodeType {
 						// No length limit - let Zoho Desk API validate
 						if (updateFields.tags !== undefined && typeof updateFields.tags === 'string') {
 							const tags = parseCommaSeparatedList(updateFields.tags)
-								.map(tag => sanitizeCRLF(tag, undefined, 'Tag'));
+								.map(tag => validateFieldLength(tag, undefined, 'Tag'));
 							if (tags.length > 0) {
 								body.tags = tags;
 							}
