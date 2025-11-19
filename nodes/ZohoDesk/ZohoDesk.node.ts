@@ -104,6 +104,23 @@ const ZOHO_DESK_API_VERSION = 'v1';
 const DEFAULT_BASE_URL = `https://desk.zoho.com/api/${ZOHO_DESK_API_VERSION}`;
 
 /**
+ * Field length limits per Zoho Desk API specifications
+ * Reference: https://desk.zoho.com/support/APIDocument#Tickets
+ */
+const FIELD_LENGTH_LIMITS = {
+	subject: 255,
+	email: 255,
+	firstName: 120,
+	lastName: 120,
+	phone: 50,
+	mobile: 50,
+	description: 30000,
+	resolution: 30000,
+	category: 100,
+	subCategory: 100,
+} as const;
+
+/**
  * HTTP error interface for proper error type handling
  */
 interface HttpError extends Error {
@@ -178,7 +195,7 @@ function parseCustomFields(cf: unknown): IDataObject {
 
 /**
  * Add optional fields to request body if they exist in source object
- * Includes sanitization for string fields to prevent injection attacks
+ * Removes CRLF characters from string fields to prevent header injection
  * @param body - Target object to add fields to
  * @param source - Source object containing field values
  * @param fields - Array of field names to copy
@@ -190,14 +207,13 @@ function addOptionalFields(
 ): void {
 	for (const field of fields) {
 		if (source[field] !== undefined) {
-			// Sanitize string fields to prevent injection attacks
+			// Remove CRLF from string fields (XSS protection handled by Zoho Desk API)
 			if (typeof source[field] === 'string') {
-				// Apply appropriate length limits based on field type
-				const maxLength = field === 'subject' ? 255 :
-								 field === 'resolution' ? 30000 :
-								 field === 'category' || field === 'subCategory' ? 100 :
-								 undefined;
-				body[field] = sanitizeString(source[field] as string, maxLength);
+				// Apply length limits from FIELD_LENGTH_LIMITS or use undefined for no limit
+				const maxLength = field in FIELD_LENGTH_LIMITS
+					? FIELD_LENGTH_LIMITS[field as keyof typeof FIELD_LENGTH_LIMITS]
+					: undefined;
+				body[field] = removeCRLF(source[field] as string, maxLength);
 			} else {
 				body[field] = source[field];
 			}
@@ -226,21 +242,30 @@ function isValidTicketId(ticketId: string): boolean {
 }
 
 /**
- * Sanitize string input to prevent injection attacks
- * @param value - String value to sanitize
- * @param maxLength - Maximum allowed length (optional)
- * @returns Sanitized string with CRLF characters removed
+ * Remove CRLF characters from string input to prevent header injection attacks.
+ *
+ * SECURITY NOTE: This function does NOT protect against XSS attacks. It only removes
+ * carriage return and line feed characters to prevent HTTP header injection.
+ *
+ * Zoho Desk API is expected to handle HTML/JavaScript escaping server-side.
+ * Input like '<script>alert(XSS)</script>' will pass through unchanged.
+ *
+ * WARNING: Silently truncates data if it exceeds maxLength. No error is thrown.
+ *
+ * @param value - String value to process
+ * @param maxLength - Maximum allowed length (optional). Data exceeding this will be truncated.
+ * @returns String with CRLF characters removed and length enforced
  */
-function sanitizeString(value: string, maxLength?: number): string {
-	// Remove CRLF injection characters
-	let sanitized = value.replace(/[\r\n]/g, '');
+function removeCRLF(value: string, maxLength?: number): string {
+	// Remove CRLF injection characters to prevent header injection
+	let cleaned = value.replace(/[\r\n]/g, '');
 
-	// Trim and enforce length limit if specified
-	if (maxLength && sanitized.length > maxLength) {
-		sanitized = sanitized.substring(0, maxLength);
+	// Enforce length limit if specified (silently truncates)
+	if (maxLength && cleaned.length > maxLength) {
+		cleaned = cleaned.substring(0, maxLength);
 	}
 
-	return sanitized;
+	return cleaned;
 }
 
 /**
@@ -261,7 +286,7 @@ function isValidEmail(email: string): boolean {
  * @param contactValues - Source contact values
  * @param fieldName - Name of the field to add
  * @param fieldLabel - Display label for error messages
- * @param maxLength - Maximum allowed length for the field
+ * @param maxLength - Maximum allowed length for the field (optional)
  */
 function addContactField(
 	contact: IDataObject,
@@ -282,18 +307,18 @@ function addContactField(
 
 	const fieldStr = String(contactValues[fieldName]).trim();
 	if (fieldStr !== '') {
-		// Sanitize the string value
-		const sanitized = sanitizeString(fieldStr, maxLength);
+		// Remove CRLF characters (does NOT protect against XSS - handled by Zoho Desk API)
+		const cleaned = removeCRLF(fieldStr, maxLength);
 
 		// Additional validation for email field
-		if (fieldName === 'email' && !isValidEmail(sanitized)) {
+		if (fieldName === 'email' && !isValidEmail(cleaned)) {
 			throw new Error(
-				`Contact validation failed: Invalid email format "${sanitized}". ` +
+				`Contact validation failed: Invalid email format "${cleaned}". ` +
 				'See: https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket',
 			);
 		}
 
-		contact[fieldName] = sanitized;
+		contact[fieldName] = cleaned;
 	}
 }
 
@@ -305,9 +330,9 @@ function addContactField(
  */
 function addCommonTicketFields(body: IDataObject, fields: IDataObject): void {
 	if (fields.description !== undefined) {
-		// Sanitize description to prevent injection attacks (max 30000 chars per Zoho Desk limits)
+		// Remove CRLF characters from description (XSS protection handled by Zoho Desk API)
 		body.description = typeof fields.description === 'string'
-			? sanitizeString(fields.description, 30000)
+			? removeCRLF(fields.description, FIELD_LENGTH_LIMITS.description)
 			: fields.description;
 	}
 	if (fields.dueDate !== undefined) {
@@ -1064,59 +1089,54 @@ export class ZohoDesk implements INodeType {
 						const contactData = this.getNodeParameter('contact', i) as IDataObject;
 						const additionalFields = this.getNodeParameter('additionalFields', i) as IDataObject;
 
-						// Sanitize subject (max 255 chars per Zoho Desk limits)
-						const subject = sanitizeString(rawSubject, 255);
+						// Remove CRLF characters from subject (XSS protection handled by Zoho Desk API)
+						const subject = removeCRLF(rawSubject, FIELD_LENGTH_LIMITS.subject);
 
 						const body: IDataObject = {
 							departmentId,
 							subject,
 						};
 
-						// Handle and validate contact object
-						// Contact is REQUIRED for ticket creation (Zoho Desk API requirement)
-						// Contact auto-creation flow:
+						// Handle and validate contact object (OPTIONAL)
+						// Contact field is optional in UI (required: false) but if provided, must be valid
+						// Contact auto-creation flow (when provided):
 						// 1. If email exists in Zoho Desk → Existing contact is used
 						// 2. If email doesn't exist → New contact is created with provided details
 						// 3. Either email OR lastName must be provided (Zoho Desk requirement)
-						if (!contactData || !contactData.contactValues) {
-							throw new Error(
-								'Contact information is required for ticket creation. Please provide at least email or lastName. ' +
-								'See: https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket',
-							);
+						if (contactData && contactData.contactValues) {
+							const contactValues = contactData.contactValues as IDataObject;
+
+							// Type guard for contactValues using isPlainObject helper
+							if (!isPlainObject(contactValues)) {
+								throw new Error(
+									'Contact validation failed: Invalid contact data format. ' +
+									'See: https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket',
+								);
+							}
+
+							// Build contact object with available non-empty fields
+							// Zoho Desk will automatically match by email or create new contact
+							// Type validation ensures we only coerce strings/numbers, not complex objects
+							const contact: IDataObject = {};
+
+							// Use helper function to add contact fields with validation and CRLF removal
+							addContactField(contact, contactValues, 'email', 'email', FIELD_LENGTH_LIMITS.email);
+							addContactField(contact, contactValues, 'lastName', 'lastName', FIELD_LENGTH_LIMITS.lastName);
+							addContactField(contact, contactValues, 'firstName', 'firstName', FIELD_LENGTH_LIMITS.firstName);
+							addContactField(contact, contactValues, 'phone', 'phone', FIELD_LENGTH_LIMITS.phone);
+							addContactField(contact, contactValues, 'mobile', 'mobile', FIELD_LENGTH_LIMITS.mobile);
+
+							// Validation: if contact is provided, ensure at least email or lastName has a non-empty value
+							// This catches all edge cases in one place
+							if (!contact.email && !contact.lastName) {
+								throw new Error(
+									'Contact validation failed: If contact is provided, either email or lastName must have a non-empty value. ' +
+									'See: https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket',
+								);
+							}
+
+							body.contact = contact;
 						}
-
-						const contactValues = contactData.contactValues as IDataObject;
-
-						// Type guard for contactValues using isPlainObject helper
-						if (!isPlainObject(contactValues)) {
-							throw new Error(
-								'Contact validation failed: Invalid contact data format. ' +
-								'See: https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket',
-							);
-						}
-
-						// Build contact object with available non-empty fields
-						// Zoho Desk will automatically match by email or create new contact
-						// Type validation ensures we only coerce strings/numbers, not complex objects
-						const contact: IDataObject = {};
-
-						// Use helper function to add contact fields with validation and sanitization
-						addContactField(contact, contactValues, 'email', 'email', 255);
-						addContactField(contact, contactValues, 'lastName', 'lastName', 120);
-						addContactField(contact, contactValues, 'firstName', 'firstName', 120);
-						addContactField(contact, contactValues, 'phone', 'phone', 50);
-						addContactField(contact, contactValues, 'mobile', 'mobile', 50);
-
-						// Single consolidated validation: ensure at least email or lastName has a non-empty value
-						// This catches all edge cases in one place
-						if (!contact.email && !contact.lastName) {
-							throw new Error(
-								'Contact validation failed: Either email or lastName must have a non-empty value. ' +
-								'See: https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket',
-							);
-						}
-
-						body.contact = contact;
 
 						// Add common fields (description, dueDate, priority, secondaryContacts, custom fields)
 						addCommonTicketFields(body, additionalFields);
