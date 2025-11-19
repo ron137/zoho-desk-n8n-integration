@@ -33,6 +33,8 @@ interface ZohoDeskListResponse<T> {
 
 /**
  * Optional fields for ticket create operation
+ * Note: Some fields like 'description', 'dueDate', 'priority', 'secondaryContacts', 'cf', and 'tags'
+ * are handled separately with custom parsing logic (see addCommonTicketFields function)
  */
 const TICKET_CREATE_OPTIONAL_FIELDS = [
 	'accountId',
@@ -52,6 +54,8 @@ const TICKET_CREATE_OPTIONAL_FIELDS = [
 
 /**
  * Optional fields for ticket update operation
+ * Note: Some fields like 'description', 'dueDate', 'priority', 'secondaryContacts', 'cf', and 'tags'
+ * are handled separately with custom parsing logic (see addCommonTicketFields function)
  */
 const TICKET_UPDATE_OPTIONAL_FIELDS = [
 	'accountId',
@@ -71,6 +75,14 @@ const TICKET_UPDATE_OPTIONAL_FIELDS = [
 	'subject',
 	'teamId',
 ] as const;
+
+/**
+ * HTTP error interface for proper error type handling
+ */
+interface HttpError extends Error {
+	statusCode?: number;
+	code?: number;
+}
 
 /**
  * Type guard to check if value is a plain object (not array or null)
@@ -962,25 +974,34 @@ export class ZohoDesk implements INodeType {
 							);
 						}
 
-						// Build contact object with available fields
+						// Build contact object with available non-empty fields
 						// Zoho Desk will automatically match by email or create new contact
 						const contact: IDataObject = {};
-						if (contactValues.email) contact.email = contactValues.email;
-						if (contactValues.lastName) contact.lastName = contactValues.lastName;
-						if (contactValues.firstName) contact.firstName = contactValues.firstName;
-						if (contactValues.phone) contact.phone = contactValues.phone;
-						if (contactValues.mobile) contact.mobile = contactValues.mobile;
+						if (contactValues.email && String(contactValues.email).trim() !== '') {
+							contact.email = contactValues.email;
+						}
+						if (contactValues.lastName && String(contactValues.lastName).trim() !== '') {
+							contact.lastName = contactValues.lastName;
+						}
+						if (contactValues.firstName && String(contactValues.firstName).trim() !== '') {
+							contact.firstName = contactValues.firstName;
+						}
+						if (contactValues.phone && String(contactValues.phone).trim() !== '') {
+							contact.phone = contactValues.phone;
+						}
+						if (contactValues.mobile && String(contactValues.mobile).trim() !== '') {
+							contact.mobile = contactValues.mobile;
+						}
 
-						// Defensive check: Only add contact if it has at least one property
-						// This catches edge case where user provides fields that exist but are all empty strings
-						// Example: {email: "", lastName: ""} would pass earlier validation but create empty object
-						if (Object.keys(contact).length > 0) {
-							body.contact = contact;
-						} else {
+						// Validate that at least email or lastName has a non-empty value
+						// This catches edge cases like {email: "", lastName: "", firstName: "John"}
+						if (!contact.email && !contact.lastName) {
 							throw new Error(
-								'Contact validation failed: At least one contact field must have a non-empty value',
+								'Contact validation failed: Either email or lastName must have a non-empty value',
 							);
 						}
+
+						body.contact = contact;
 
 						// Add common fields (description, dueDate, priority, secondaryContacts, custom fields)
 						addCommonTicketFields(body, additionalFields);
@@ -1062,7 +1083,7 @@ export class ZohoDesk implements INodeType {
 				}
 			} catch (error) {
 				// Check for rate limiting (HTTP 429)
-				const errorObj = error as any;
+				const errorObj = error as HttpError;
 				if (errorObj.statusCode === 429 || errorObj.code === 429) {
 					const rateLimitError = new Error(
 						'Zoho Desk API rate limit exceeded (10 requests/second per organization). ' +
