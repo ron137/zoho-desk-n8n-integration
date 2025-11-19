@@ -104,20 +104,29 @@ const ZOHO_DESK_API_VERSION = 'v1';
 const DEFAULT_BASE_URL = `https://desk.zoho.com/api/${ZOHO_DESK_API_VERSION}`;
 
 /**
- * Field length limits per Zoho Desk API specifications
+ * Recommended field length limits based on common database constraints and best practices.
+ *
+ * NOTE: These are RECOMMENDED limits, not officially documented by Zoho Desk API.
+ * They are based on:
+ * - Standard VARCHAR limits for database fields
+ * - Best practices for form validation
+ * - Reasonable limits for user input
+ *
+ * If you encounter API errors related to field lengths, these limits may need adjustment.
  * Reference: https://desk.zoho.com/support/APIDocument#Tickets
  */
 const FIELD_LENGTH_LIMITS = {
-	subject: 255,
-	email: 255,
-	firstName: 120,
-	lastName: 120,
-	phone: 50,
-	mobile: 50,
-	description: 30000,
-	resolution: 30000,
-	category: 100,
-	subCategory: 100,
+	subject: 255,        // Typical subject line limit
+	email: 254,          // RFC 5321 maximum email length
+	firstName: 120,      // Common name field limit
+	lastName: 120,       // Common name field limit
+	phone: 50,           // Sufficient for international phone formats
+	mobile: 50,          // Sufficient for international mobile formats
+	description: 30000,  // Generous limit for ticket descriptions
+	resolution: 30000,   // Generous limit for resolution notes
+	category: 100,       // Typical category name limit
+	subCategory: 100,    // Typical subcategory name limit
+	tag: 50,             // Individual tag length limit
 } as const;
 
 /**
@@ -153,9 +162,9 @@ function parseCommaSeparatedList(value: string | undefined): string[] {
 }
 
 /**
- * Parse custom fields JSON with enhanced error handling and type validation
+ * Parse custom fields JSON with enhanced error handling, type validation, and CRLF removal
  * @param cf - Custom fields as JSON string or object
- * @returns Parsed custom fields object
+ * @returns Parsed and sanitized custom fields object
  * @throws Error with detailed message if JSON parsing fails or result is not a plain object
  */
 function parseCustomFields(cf: unknown): IDataObject {
@@ -175,10 +184,25 @@ function parseCustomFields(cf: unknown): IDataObject {
 			);
 		}
 
-		return parsed as IDataObject;
+		// Sanitize all string values in custom fields to remove CRLF characters
+		const sanitized: IDataObject = {};
+		for (const [key, value] of Object.entries(parsed)) {
+			if (typeof value === 'string') {
+				// Remove CRLF from custom field values (no length limit specified)
+				sanitized[key] = removeCRLF(value, undefined, `Custom field "${key}"`);
+			} else if (value !== null && value !== undefined) {
+				// Keep non-string, non-null values as-is
+				sanitized[key] = value as string | number | boolean | IDataObject;
+			}
+		}
+
+		return sanitized;
 	} catch (error) {
-		// Check if error is already a validation error from isPlainObject check
-		if (error instanceof Error && error.message.includes('Custom fields must be a JSON object')) {
+		// Check if error is already a validation error from isPlainObject check or removeCRLF
+		if (error instanceof Error && (
+			error.message.includes('Custom fields must be a JSON object') ||
+			error.message.includes('exceeds maximum length')
+		)) {
 			// Re-throw validation errors without wrapping to preserve specific details
 			throw error;
 		}
@@ -209,11 +233,21 @@ function addOptionalFields(
 		if (source[field] !== undefined) {
 			// Remove CRLF from string fields (XSS protection handled by Zoho Desk API)
 			if (typeof source[field] === 'string') {
+				const stringValue = source[field] as string;
+
+				// Validate ID fields
+				if (field.endsWith('Id') && stringValue.trim() !== '') {
+					const fieldName = field.charAt(0).toUpperCase() + field.slice(1);
+					isValidZohoDeskId(stringValue, fieldName);
+				}
+
 				// Apply length limits from FIELD_LENGTH_LIMITS or use undefined for no limit
 				const maxLength = field in FIELD_LENGTH_LIMITS
 					? FIELD_LENGTH_LIMITS[field as keyof typeof FIELD_LENGTH_LIMITS]
 					: undefined;
-				body[field] = removeCRLF(source[field] as string, maxLength);
+				// Capitalize field name for better error messages
+				const fieldName = field.charAt(0).toUpperCase() + field.slice(1);
+				body[field] = removeCRLF(stringValue, maxLength, fieldName);
 			} else {
 				body[field] = source[field];
 			}
@@ -242,6 +276,33 @@ function isValidTicketId(ticketId: string): boolean {
 }
 
 /**
+ * Validate generic Zoho Desk ID format (for accounts, departments, teams, etc.)
+ * @param id - ID to validate
+ * @param fieldName - Field name for error messages
+ * @returns True if ID is valid (numeric or n8n expression), false otherwise
+ */
+function isValidZohoDeskId(id: string, fieldName: string): boolean {
+	const trimmed = id.trim();
+
+	// Allow n8n expressions - validation happens at runtime
+	if (/\{\{.+?\}\}/.test(trimmed)) {
+		return true;
+	}
+
+	// Zoho Desk IDs are numeric strings (minimum 10 digits for safety)
+	// Less strict than ticket IDs as different resources may have different lengths
+	const pattern = /^\d{10,}$/;
+	if (!pattern.test(trimmed)) {
+		throw new Error(
+			`Invalid ${fieldName} format: "${trimmed}". ` +
+			`${fieldName} must be a numeric value with at least 10 digits.`,
+		);
+	}
+
+	return true;
+}
+
+/**
  * Remove CRLF characters from string input to prevent header injection attacks.
  *
  * SECURITY NOTE: This function does NOT protect against XSS attacks. It only removes
@@ -250,33 +311,39 @@ function isValidTicketId(ticketId: string): boolean {
  * Zoho Desk API is expected to handle HTML/JavaScript escaping server-side.
  * Input like '<script>alert(XSS)</script>' will pass through unchanged.
  *
- * WARNING: Silently truncates data if it exceeds maxLength. No error is thrown.
- *
  * @param value - String value to process
- * @param maxLength - Maximum allowed length (optional). Data exceeding this will be truncated.
- * @returns String with CRLF characters removed and length enforced
+ * @param maxLength - Maximum allowed length (optional). Throws error if exceeded.
+ * @param fieldName - Field name for error messages (optional, defaults to 'Field')
+ * @returns String with CRLF characters removed
+ * @throws Error if value exceeds maxLength
  */
-function removeCRLF(value: string, maxLength?: number): string {
+function removeCRLF(value: string, maxLength?: number, fieldName?: string): string {
 	// Remove CRLF injection characters to prevent header injection
-	let cleaned = value.replace(/[\r\n]/g, '');
+	const cleaned = value.replace(/[\r\n]/g, '');
 
-	// Enforce length limit if specified (silently truncates)
+	// Enforce length limit if specified - THROW ERROR instead of silent truncation
 	if (maxLength && cleaned.length > maxLength) {
-		cleaned = cleaned.substring(0, maxLength);
+		throw new Error(
+			`${fieldName || 'Field'} exceeds maximum length of ${maxLength} characters (${cleaned.length} provided). ` +
+			'Please shorten your input and try again.',
+		);
 	}
 
 	return cleaned;
 }
 
 /**
- * Validate and sanitize email format
+ * Validate email format using RFC 5322 compliant regex (simplified version)
  * @param email - Email address to validate
  * @returns True if email format is valid
  */
 function isValidEmail(email: string): boolean {
-	// Basic email validation regex
-	const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-	return emailRegex.test(email);
+	// RFC 5322 compliant regex (simplified version)
+	// Validates structure and common special characters
+	const emailRegex = /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
+	// RFC 5321 maximum email length is 254 characters
+	return emailRegex.test(email) && email.length <= 254;
 }
 
 /**
@@ -308,7 +375,7 @@ function addContactField(
 	const fieldStr = String(contactValues[fieldName]).trim();
 	if (fieldStr !== '') {
 		// Remove CRLF characters (does NOT protect against XSS - handled by Zoho Desk API)
-		const cleaned = removeCRLF(fieldStr, maxLength);
+		const cleaned = removeCRLF(fieldStr, maxLength, `Contact ${fieldLabel}`);
 
 		// Additional validation for email field
 		if (fieldName === 'email' && !isValidEmail(cleaned)) {
@@ -332,7 +399,7 @@ function addCommonTicketFields(body: IDataObject, fields: IDataObject): void {
 	if (fields.description !== undefined) {
 		// Remove CRLF characters from description (XSS protection handled by Zoho Desk API)
 		body.description = typeof fields.description === 'string'
-			? removeCRLF(fields.description, FIELD_LENGTH_LIMITS.description)
+			? removeCRLF(fields.description, FIELD_LENGTH_LIMITS.description, 'Description')
 			: fields.description;
 	}
 	if (fields.dueDate !== undefined) {
@@ -1090,7 +1157,7 @@ export class ZohoDesk implements INodeType {
 						const additionalFields = this.getNodeParameter('additionalFields', i) as IDataObject;
 
 						// Remove CRLF characters from subject (XSS protection handled by Zoho Desk API)
-						const subject = removeCRLF(rawSubject, FIELD_LENGTH_LIMITS.subject);
+						const subject = removeCRLF(rawSubject, FIELD_LENGTH_LIMITS.subject, 'Subject');
 
 						const body: IDataObject = {
 							departmentId,
@@ -1144,9 +1211,10 @@ export class ZohoDesk implements INodeType {
 						// Add other additional fields
 						addOptionalFields(body, additionalFields, TICKET_CREATE_OPTIONAL_FIELDS);
 
-						// Handle tags with filtering of empty values
+						// Handle tags with filtering of empty values and CRLF removal
 						if (additionalFields.tags && typeof additionalFields.tags === 'string') {
-							const tags = parseCommaSeparatedList(additionalFields.tags);
+							const tags = parseCommaSeparatedList(additionalFields.tags)
+								.map(tag => removeCRLF(tag, FIELD_LENGTH_LIMITS.tag, 'Tag'));
 							if (tags.length > 0) {
 								body.tags = tags;
 							}
@@ -1191,9 +1259,10 @@ export class ZohoDesk implements INodeType {
 						// Add other update fields
 						addOptionalFields(body, updateFields, TICKET_UPDATE_OPTIONAL_FIELDS);
 
-						// Handle tags with filtering of empty values
+						// Handle tags with filtering of empty values and CRLF removal
 						if (updateFields.tags !== undefined && typeof updateFields.tags === 'string') {
-							const tags = parseCommaSeparatedList(updateFields.tags);
+							const tags = parseCommaSeparatedList(updateFields.tags)
+								.map(tag => removeCRLF(tag, FIELD_LENGTH_LIMITS.tag, 'Tag'));
 							if (tags.length > 0) {
 								body.tags = tags;
 							}
