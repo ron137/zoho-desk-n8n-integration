@@ -12,7 +12,9 @@ import {
  * Zoho Desk Department response structure
  */
 interface ZohoDeskDepartment {
+	/** Unique identifier for the department */
 	id: string;
+	/** Display name of the department */
 	name: string;
 }
 
@@ -20,7 +22,9 @@ interface ZohoDeskDepartment {
  * Zoho Desk Team response structure
  */
 interface ZohoDeskTeam {
+	/** Unique identifier for the team */
 	id: string;
+	/** Display name of the team */
 	name: string;
 }
 
@@ -28,6 +32,7 @@ interface ZohoDeskTeam {
  * Zoho Desk API list response wrapper
  */
 interface ZohoDeskListResponse<T> {
+	/** Array of data items returned by the API */
 	data: T[];
 }
 
@@ -82,6 +87,21 @@ const TICKET_UPDATE_OPTIONAL_FIELDS = [
  * across different Zoho configurations and data centers
  */
 const MIN_TICKET_ID_LENGTH = 10;
+
+/**
+ * Default status for new tickets
+ */
+const DEFAULT_TICKET_STATUS = 'Open';
+
+/**
+ * Zoho Desk API version
+ */
+const ZOHO_DESK_API_VERSION = 'v1';
+
+/**
+ * Default base URL for Zoho Desk API
+ */
+const DEFAULT_BASE_URL = `https://desk.zoho.com/api/${ZOHO_DESK_API_VERSION}`;
 
 /**
  * HTTP error interface for proper error type handling
@@ -158,6 +178,7 @@ function parseCustomFields(cf: unknown): IDataObject {
 
 /**
  * Add optional fields to request body if they exist in source object
+ * Includes sanitization for string fields to prevent injection attacks
  * @param body - Target object to add fields to
  * @param source - Source object containing field values
  * @param fields - Array of field names to copy
@@ -169,7 +190,17 @@ function addOptionalFields(
 ): void {
 	for (const field of fields) {
 		if (source[field] !== undefined) {
-			body[field] = source[field];
+			// Sanitize string fields to prevent injection attacks
+			if (typeof source[field] === 'string') {
+				// Apply appropriate length limits based on field type
+				const maxLength = field === 'subject' ? 255 :
+								 field === 'resolution' ? 30000 :
+								 field === 'category' || field === 'subCategory' ? 100 :
+								 undefined;
+				body[field] = sanitizeString(source[field] as string, maxLength);
+			} else {
+				body[field] = source[field];
+			}
 		}
 	}
 }
@@ -195,6 +226,78 @@ function isValidTicketId(ticketId: string): boolean {
 }
 
 /**
+ * Sanitize string input to prevent injection attacks
+ * @param value - String value to sanitize
+ * @param maxLength - Maximum allowed length (optional)
+ * @returns Sanitized string with CRLF characters removed
+ */
+function sanitizeString(value: string, maxLength?: number): string {
+	// Remove CRLF injection characters
+	let sanitized = value.replace(/[\r\n]/g, '');
+
+	// Trim and enforce length limit if specified
+	if (maxLength && sanitized.length > maxLength) {
+		sanitized = sanitized.substring(0, maxLength);
+	}
+
+	return sanitized;
+}
+
+/**
+ * Validate and sanitize email format
+ * @param email - Email address to validate
+ * @returns True if email format is valid
+ */
+function isValidEmail(email: string): boolean {
+	// Basic email validation regex
+	const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+	return emailRegex.test(email);
+}
+
+/**
+ * Add a contact field with validation and type checking
+ * Reduces code duplication in contact validation
+ * @param contact - Target contact object
+ * @param contactValues - Source contact values
+ * @param fieldName - Name of the field to add
+ * @param fieldLabel - Display label for error messages
+ * @param maxLength - Maximum allowed length for the field
+ */
+function addContactField(
+	contact: IDataObject,
+	contactValues: Record<string, unknown>,
+	fieldName: string,
+	fieldLabel: string,
+	maxLength?: number,
+): void {
+	if (!contactValues[fieldName]) return;
+
+	const fieldType = typeof contactValues[fieldName];
+	if (fieldType !== 'string' && fieldType !== 'number') {
+		throw new Error(
+			`Contact validation failed: ${fieldLabel} must be a string or number, not a complex object. ` +
+			'See: https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket',
+		);
+	}
+
+	const fieldStr = String(contactValues[fieldName]).trim();
+	if (fieldStr !== '') {
+		// Sanitize the string value
+		const sanitized = sanitizeString(fieldStr, maxLength);
+
+		// Additional validation for email field
+		if (fieldName === 'email' && !isValidEmail(sanitized)) {
+			throw new Error(
+				`Contact validation failed: Invalid email format "${sanitized}". ` +
+				'See: https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket',
+			);
+		}
+
+		contact[fieldName] = sanitized;
+	}
+}
+
+/**
  * Add common ticket fields (description, dueDate, priority, secondaryContacts, custom fields)
  * This eliminates code duplication between create and update operations
  * @param body - Target object to add fields to
@@ -202,7 +305,10 @@ function isValidTicketId(ticketId: string): boolean {
  */
 function addCommonTicketFields(body: IDataObject, fields: IDataObject): void {
 	if (fields.description !== undefined) {
-		body.description = fields.description;
+		// Sanitize description to prevent injection attacks (max 30000 chars per Zoho Desk limits)
+		body.description = typeof fields.description === 'string'
+			? sanitizeString(fields.description, 30000)
+			: fields.description;
 	}
 	if (fields.dueDate !== undefined) {
 		body.dueDate = fields.dueDate;
@@ -320,7 +426,7 @@ export class ZohoDesk implements INodeType {
 				typeOptions: {
 					multipleValues: false,
 				},
-				required: true,
+				required: false,
 				displayOptions: {
 					show: {
 						resource: ['ticket'],
@@ -441,7 +547,7 @@ export class ZohoDesk implements INodeType {
 							loadOptionsDependsOn: ['departmentId'],
 						},
 						default: '',
-						description: 'The team assigned to the ticket',
+						description: 'The team assigned to the ticket. Note: Teams will only load if Department is selected first.',
 					},
 					{
 						displayName: 'Custom Fields',
@@ -562,8 +668,8 @@ export class ZohoDesk implements INodeType {
 						displayName: 'Status',
 						name: 'status',
 						type: 'string',
-						default: 'Open',
-						description: 'Status of the ticket (default: Open for new tickets)',
+						default: DEFAULT_TICKET_STATUS,
+						description: `Status of the ticket (default: ${DEFAULT_TICKET_STATUS} for new tickets)`,
 					},
 					{
 						displayName: 'Sub Category',
@@ -826,7 +932,7 @@ export class ZohoDesk implements INodeType {
 							loadOptionsDependsOn: ['departmentId'],
 						},
 						default: '',
-						description: 'The team assigned to the ticket',
+						description: 'The team assigned to the ticket. Note: Teams will only load if Department is selected first.',
 					},
 				],
 			},
@@ -843,7 +949,7 @@ export class ZohoDesk implements INodeType {
 				try {
 					const credentials = await this.getCredentials('zohoDeskOAuth2Api');
 					const orgId = credentials.orgId as string;
-					const baseUrl = (credentials.baseUrl as string | undefined) || 'https://desk.zoho.com/api/v1';
+					const baseUrl = (credentials.baseUrl as string | undefined) || DEFAULT_BASE_URL;
 
 					const options = {
 						method: 'GET',
@@ -873,11 +979,12 @@ export class ZohoDesk implements INodeType {
 						value: department.id,
 					}));
 				} catch (error) {
-					// Log error for debugging while preventing UI breaks
+					// Return error option in dropdown so users can see what went wrong
 					const errorMessage = error instanceof Error ? error.message : String(error);
-					console.error('Failed to load departments from Zoho Desk:', errorMessage);
-					// Return empty array to prevent UI breaks - user will see empty dropdown
-					return [];
+					return [{
+						name: `⚠️ Error loading departments: ${errorMessage}`,
+						value: '',
+					}];
 				}
 			},
 
@@ -889,7 +996,7 @@ export class ZohoDesk implements INodeType {
 				try {
 					const credentials = await this.getCredentials('zohoDeskOAuth2Api');
 					const orgId = credentials.orgId as string;
-					const baseUrl = (credentials.baseUrl as string | undefined) || 'https://desk.zoho.com/api/v1';
+					const baseUrl = (credentials.baseUrl as string | undefined) || DEFAULT_BASE_URL;
 					const departmentId = this.getCurrentNodeParameter('departmentId');
 
 					// Type guard: departmentId is optional in update operation
@@ -925,11 +1032,12 @@ export class ZohoDesk implements INodeType {
 						value: team.id,
 					}));
 				} catch (error) {
-					// Log error for debugging while preventing UI breaks
+					// Return error option in dropdown so users can see what went wrong
 					const errorMessage = error instanceof Error ? error.message : String(error);
-					console.error('Failed to load teams from Zoho Desk:', errorMessage);
-					// Return empty array to prevent UI breaks - user will see empty dropdown
-					return [];
+					return [{
+						name: `⚠️ Error loading teams: ${errorMessage}`,
+						value: '',
+					}];
 				}
 			},
 		},
@@ -944,7 +1052,7 @@ export class ZohoDesk implements INodeType {
 		// Fetch credentials once for all items (optimization)
 		const credentials = await this.getCredentials('zohoDeskOAuth2Api');
 		const orgId = credentials.orgId as string;
-		const baseUrl = (credentials.baseUrl as string | undefined) || 'https://desk.zoho.com/api/v1';
+		const baseUrl = (credentials.baseUrl as string | undefined) || DEFAULT_BASE_URL;
 
 		for (let i = 0; i < items.length; i++) {
 			try {
@@ -952,9 +1060,12 @@ export class ZohoDesk implements INodeType {
 					if (operation === 'create') {
 						// Create ticket
 						const departmentId = this.getNodeParameter('departmentId', i) as string;
-						const subject = this.getNodeParameter('subject', i) as string;
+						const rawSubject = this.getNodeParameter('subject', i) as string;
 						const contactData = this.getNodeParameter('contact', i) as IDataObject;
 						const additionalFields = this.getNodeParameter('additionalFields', i) as IDataObject;
+
+						// Sanitize subject (max 255 chars per Zoho Desk limits)
+						const subject = sanitizeString(rawSubject, 255);
 
 						const body: IDataObject = {
 							departmentId,
@@ -989,75 +1100,12 @@ export class ZohoDesk implements INodeType {
 						// Type validation ensures we only coerce strings/numbers, not complex objects
 						const contact: IDataObject = {};
 
-						if (contactValues.email) {
-							const emailType = typeof contactValues.email;
-							if (emailType !== 'string' && emailType !== 'number') {
-								throw new Error(
-									'Contact validation failed: email must be a string or number, not a complex object. ' +
-									'See: https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket',
-								);
-							}
-							const emailStr = String(contactValues.email).trim();
-							if (emailStr !== '') {
-								contact.email = contactValues.email;
-							}
-						}
-
-						if (contactValues.lastName) {
-							const lastNameType = typeof contactValues.lastName;
-							if (lastNameType !== 'string' && lastNameType !== 'number') {
-								throw new Error(
-									'Contact validation failed: lastName must be a string or number, not a complex object. ' +
-									'See: https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket',
-								);
-							}
-							const lastNameStr = String(contactValues.lastName).trim();
-							if (lastNameStr !== '') {
-								contact.lastName = contactValues.lastName;
-							}
-						}
-
-						if (contactValues.firstName) {
-							const firstNameType = typeof contactValues.firstName;
-							if (firstNameType !== 'string' && firstNameType !== 'number') {
-								throw new Error(
-									'Contact validation failed: firstName must be a string or number, not a complex object. ' +
-									'See: https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket',
-								);
-							}
-							const firstNameStr = String(contactValues.firstName).trim();
-							if (firstNameStr !== '') {
-								contact.firstName = contactValues.firstName;
-							}
-						}
-
-						if (contactValues.phone) {
-							const phoneType = typeof contactValues.phone;
-							if (phoneType !== 'string' && phoneType !== 'number') {
-								throw new Error(
-									'Contact validation failed: phone must be a string or number, not a complex object. ' +
-									'See: https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket',
-								);
-							}
-							const phoneStr = String(contactValues.phone).trim();
-							if (phoneStr !== '') {
-								contact.phone = contactValues.phone;
-							}
-						}
-
-						if (contactValues.mobile) {
-							const mobileType = typeof contactValues.mobile;
-							if (mobileType !== 'string' && mobileType !== 'number') {
-								throw new Error(
-									'Contact validation failed: mobile must be a string or number, not a complex object. ' +
-									'See: https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket',
-								);
-							}
-							const mobileStr = String(contactValues.mobile).trim();
-							if (mobileStr !== '') {
-								contact.mobile = contactValues.mobile;
-							}
-						}
+						// Use helper function to add contact fields with validation and sanitization
+						addContactField(contact, contactValues, 'email', 'email', 255);
+						addContactField(contact, contactValues, 'lastName', 'lastName', 120);
+						addContactField(contact, contactValues, 'firstName', 'firstName', 120);
+						addContactField(contact, contactValues, 'phone', 'phone', 50);
+						addContactField(contact, contactValues, 'mobile', 'mobile', 50);
 
 						// Single consolidated validation: ensure at least email or lastName has a non-empty value
 						// This catches all edge cases in one place
