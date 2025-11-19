@@ -79,6 +79,10 @@ Both operations support many optional fields including description, dueDate, pri
 **Dynamic Resource Loading**: The node uses `loadOptionsMethod` to fetch:
 - Departments list from `/departments` endpoint
 - Teams list from `/departments/{departmentId}/teams` endpoint (depends on selected department)
+- **Caching**: n8n automatically caches the dropdown options after initial load. The data is refreshed when:
+  - The node is reopened
+  - The user manually refreshes the dropdown
+  - The parent parameter changes (e.g., changing department reloads teams)
 
 **Contact Object Handling**: Instead of requiring a contactId, the create operation accepts a `contact` object with:
 - Email (required if lastName not provided)

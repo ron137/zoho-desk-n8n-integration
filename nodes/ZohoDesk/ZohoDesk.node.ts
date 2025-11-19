@@ -8,6 +8,89 @@ import {
 	INodePropertyOptions,
 } from 'n8n-workflow';
 
+/**
+ * Zoho Desk Department response structure
+ */
+interface ZohoDeskDepartment {
+	id: string;
+	name: string;
+}
+
+/**
+ * Zoho Desk Team response structure
+ */
+interface ZohoDeskTeam {
+	id: string;
+	name: string;
+}
+
+/**
+ * Zoho Desk API list response wrapper
+ */
+interface ZohoDeskListResponse<T> {
+	data: T[];
+}
+
+/**
+ * Parse comma-separated list and filter out empty values
+ * @param value - Comma-separated string
+ * @returns Array of trimmed non-empty values
+ */
+function parseCommaSeparatedList(value: string): string[] {
+	return value
+		.split(',')
+		.map((item) => item.trim())
+		.filter((item) => item.length > 0);
+}
+
+/**
+ * Parse custom fields JSON with enhanced error handling
+ * @param cf - Custom fields as JSON string or object
+ * @returns Parsed custom fields object
+ * @throws Error with detailed message if JSON parsing fails
+ */
+function parseCustomFields(cf: unknown): IDataObject {
+	try {
+		if (typeof cf === 'string') {
+			return JSON.parse(cf) as IDataObject;
+		}
+		return cf as IDataObject;
+	} catch (error) {
+		throw new Error(
+			`Custom fields must be valid JSON. Parse error: ${error.message}. ` +
+				`Please ensure your JSON is properly formatted, e.g., {"cf_field": "value"}`,
+		);
+	}
+}
+
+/**
+ * Add optional fields to request body if they exist in source object
+ * @param body - Target object to add fields to
+ * @param source - Source object containing field values
+ * @param fields - Array of field names to copy
+ */
+function addOptionalFields(
+	body: IDataObject,
+	source: IDataObject,
+	fields: string[],
+): void {
+	for (const field of fields) {
+		if (source[field] !== undefined) {
+			body[field] = source[field];
+		}
+	}
+}
+
+/**
+ * Validate ticket ID format
+ * @param ticketId - Ticket ID to validate
+ * @returns True if ticket ID is valid (numeric), false otherwise
+ */
+function isValidTicketId(ticketId: string): boolean {
+	// Ticket IDs in Zoho Desk are numeric strings
+	return /^\d+$/.test(ticketId.trim());
+}
+
 export class ZohoDesk implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Zoho Desk',
@@ -216,6 +299,7 @@ export class ZohoDesk implements INodeType {
 						type: 'string',
 						default: '',
 						description: 'Comma-separated list of contact IDs for secondary contacts',
+						placeholder: '1892000000042038, 1892000000042042',
 					},
 					{
 						displayName: 'Team',
@@ -232,8 +316,9 @@ export class ZohoDesk implements INodeType {
 						displayName: 'Custom Fields',
 						name: 'cf',
 						type: 'json',
-						default: '{}',
-						description: 'Custom fields as JSON object (e.g., {"cf_modelname": "F3 2017", "cf_phone": "123456"})',
+						default: '',
+						description: 'Custom fields as JSON object',
+						placeholder: '{"cf_modelname": "F3 2017", "cf_phone": "123456"}',
 					},
 					{
 						displayName: 'Account ID',
@@ -362,6 +447,7 @@ export class ZohoDesk implements INodeType {
 						type: 'string',
 						default: '',
 						description: 'Comma-separated list of tags associated with the ticket',
+						placeholder: 'urgent, customer-service, billing',
 					},
 				],
 			},
@@ -437,13 +523,15 @@ export class ZohoDesk implements INodeType {
 						type: 'string',
 						default: '',
 						description: 'Comma-separated list of contact IDs for secondary contacts',
+						placeholder: '1892000000042038, 1892000000042042',
 					},
 					{
 						displayName: 'Custom Fields',
 						name: 'cf',
 						type: 'json',
-						default: '{}',
-						description: 'Custom fields as JSON object (e.g., {"cf_modelname": "F3 2017", "cf_phone": "123456"})',
+						default: '',
+						description: 'Custom fields as JSON object',
+						placeholder: '{"cf_modelname": "F3 2017", "cf_phone": "123456"}',
 					},
 					{
 						displayName: 'Account ID',
@@ -596,6 +684,7 @@ export class ZohoDesk implements INodeType {
 						type: 'string',
 						default: '',
 						description: 'Comma-separated list of tags associated with the ticket',
+						placeholder: 'urgent, customer-service, billing',
 					},
 					{
 						displayName: 'Team',
@@ -615,6 +704,10 @@ export class ZohoDesk implements INodeType {
 
 	methods = {
 		loadOptions: {
+			/**
+			 * Load all departments from Zoho Desk
+			 * @returns Array of department options for dropdown
+			 */
 			async getDepartments(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				const credentials = await this.getCredentials('zohoDeskOAuth2Api');
 				const orgId = credentials.orgId as string;
@@ -629,15 +722,23 @@ export class ZohoDesk implements INodeType {
 					json: true,
 				};
 
-				const response = await this.helpers.requestOAuth2.call(this, 'zohoDeskOAuth2Api', options);
+				const response = await this.helpers.requestOAuth2.call(
+					this,
+					'zohoDeskOAuth2Api',
+					options,
+				) as ZohoDeskListResponse<ZohoDeskDepartment>;
 
 				const departments = response.data || [];
-				return departments.map((department: any) => ({
+				return departments.map((department) => ({
 					name: department.name,
 					value: department.id,
 				}));
 			},
 
+			/**
+			 * Load teams for a specific department from Zoho Desk
+			 * @returns Array of team options for dropdown, or empty array if department not selected
+			 */
 			async getTeams(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				const credentials = await this.getCredentials('zohoDeskOAuth2Api');
 				const orgId = credentials.orgId as string;
@@ -658,14 +759,21 @@ export class ZohoDesk implements INodeType {
 				};
 
 				try {
-					const response = await this.helpers.requestOAuth2.call(this, 'zohoDeskOAuth2Api', options);
+					const response = await this.helpers.requestOAuth2.call(
+						this,
+						'zohoDeskOAuth2Api',
+						options,
+					) as ZohoDeskListResponse<ZohoDeskTeam>;
+
 					const teams = response.data || [];
-					return teams.map((team: any) => ({
+					return teams.map((team) => ({
 						name: team.name,
 						value: team.id,
 					}));
 				} catch (error) {
-					// If teams endpoint fails, return empty array
+					// Return empty array if department has no teams or if there's an API error
+					// This prevents the UI from breaking when a department has no teams
+					console.warn(`Failed to load teams for department ${departmentId}: ${error.message}`);
 					return [];
 				}
 			},
@@ -678,15 +786,14 @@ export class ZohoDesk implements INodeType {
 		const resource = this.getNodeParameter('resource', 0);
 		const operation = this.getNodeParameter('operation', 0);
 
+		// Fetch credentials once for all items (optimization)
+		const credentials = await this.getCredentials('zohoDeskOAuth2Api');
+		const orgId = credentials.orgId as string;
+		const baseUrl = (credentials.baseUrl as string) || 'https://desk.zoho.com/api/v1';
+
 		for (let i = 0; i < items.length; i++) {
 			try {
 				if (resource === 'ticket') {
-					const credentials = await this.getCredentials('zohoDeskOAuth2Api');
-					const orgId = credentials.orgId as string;
-
-					// Base URL from credentials or default
-					const baseUrl = credentials.baseUrl || 'https://desk.zoho.com/api/v1';
-
 					if (operation === 'create') {
 						// Create ticket
 						const departmentId = this.getNodeParameter('departmentId', i) as string;
@@ -699,9 +806,17 @@ export class ZohoDesk implements INodeType {
 							subject,
 						};
 
-						// Handle contact object
+						// Handle and validate contact object
 						if (contactData && contactData.contactValues) {
 							const contactValues = contactData.contactValues as IDataObject;
+
+							// Validate that at least email or lastName is provided
+							if (!contactValues.email && !contactValues.lastName) {
+								throw new Error(
+									'Contact validation failed: Either email or lastName must be provided for the contact',
+								);
+							}
+
 							if (contactValues.email || contactValues.lastName) {
 								const contact: IDataObject = {};
 								if (contactValues.email) contact.email = contactValues.email;
@@ -713,7 +828,7 @@ export class ZohoDesk implements INodeType {
 							}
 						}
 
-						// Add description, dueDate, priority, secondaryContacts at top level
+						// Add description, dueDate, priority, secondaryContacts
 						if (additionalFields.description) {
 							body.description = additionalFields.description;
 						}
@@ -724,64 +839,40 @@ export class ZohoDesk implements INodeType {
 							body.priority = additionalFields.priority;
 						}
 						if (additionalFields.secondaryContacts) {
-							body.secondaryContacts = (additionalFields.secondaryContacts as string)
-								.split(',')
-								.map(id => id.trim());
-						}
-
-						// Add custom fields
-						if (additionalFields.cf) {
-							try {
-								body.cf = typeof additionalFields.cf === 'string'
-									? JSON.parse(additionalFields.cf as string)
-									: additionalFields.cf;
-							} catch (error) {
-								throw new Error('Custom fields must be valid JSON');
+							const contacts = parseCommaSeparatedList(additionalFields.secondaryContacts as string);
+							if (contacts.length > 0) {
+								body.secondaryContacts = contacts;
 							}
 						}
 
+						// Add custom fields with enhanced error handling
+						if (additionalFields.cf) {
+							body.cf = parseCustomFields(additionalFields.cf);
+						}
+
 						// Add other additional fields
-						if (additionalFields.accountId) {
-							body.accountId = additionalFields.accountId;
-						}
-						if (additionalFields.assigneeId) {
-							body.assigneeId = additionalFields.assigneeId;
-						}
-						if (additionalFields.category) {
-							body.category = additionalFields.category;
-						}
-						if (additionalFields.channel) {
-							body.channel = additionalFields.channel;
-						}
-						if (additionalFields.classification) {
-							body.classification = additionalFields.classification;
-						}
-						if (additionalFields.email) {
-							body.email = additionalFields.email;
-						}
-						if (additionalFields.language) {
-							body.language = additionalFields.language;
-						}
-						if (additionalFields.phone) {
-							body.phone = additionalFields.phone;
-						}
-						if (additionalFields.productId) {
-							body.productId = additionalFields.productId;
-						}
-						if (additionalFields.resolution) {
-							body.resolution = additionalFields.resolution;
-						}
-						if (additionalFields.status) {
-							body.status = additionalFields.status;
-						}
-						if (additionalFields.subCategory) {
-							body.subCategory = additionalFields.subCategory;
-						}
+						addOptionalFields(body, additionalFields, [
+							'accountId',
+							'assigneeId',
+							'category',
+							'channel',
+							'classification',
+							'email',
+							'language',
+							'phone',
+							'productId',
+							'resolution',
+							'status',
+							'subCategory',
+							'teamId',
+						]);
+
+						// Handle tags with filtering of empty values
 						if (additionalFields.tags) {
-							body.tags = (additionalFields.tags as string).split(',').map(tag => tag.trim());
-						}
-						if (additionalFields.teamId) {
-							body.teamId = additionalFields.teamId;
+							const tags = parseCommaSeparatedList(additionalFields.tags as string);
+							if (tags.length > 0) {
+								body.tags = tags;
+							}
 						}
 
 						const options = {
@@ -807,6 +898,13 @@ export class ZohoDesk implements INodeType {
 						const ticketId = this.getNodeParameter('ticketId', i) as string;
 						const updateFields = this.getNodeParameter('updateFields', i) as IDataObject;
 
+						// Validate ticket ID format (should be numeric)
+						if (!isValidTicketId(ticketId)) {
+							throw new Error(
+								`Invalid ticket ID format: "${ticketId}". Ticket ID must be a numeric value.`,
+							);
+						}
+
 						const body: IDataObject = {};
 
 						// Add description, dueDate, priority, secondaryContacts
@@ -820,73 +918,43 @@ export class ZohoDesk implements INodeType {
 							body.priority = updateFields.priority;
 						}
 						if (updateFields.secondaryContacts !== undefined) {
-							body.secondaryContacts = (updateFields.secondaryContacts as string)
-								.split(',')
-								.map(id => id.trim());
-						}
-
-						// Add custom fields
-						if (updateFields.cf !== undefined) {
-							try {
-								body.cf = typeof updateFields.cf === 'string'
-									? JSON.parse(updateFields.cf as string)
-									: updateFields.cf;
-							} catch (error) {
-								throw new Error('Custom fields must be valid JSON');
+							const contacts = parseCommaSeparatedList(updateFields.secondaryContacts as string);
+							if (contacts.length > 0) {
+								body.secondaryContacts = contacts;
 							}
 						}
 
+						// Add custom fields with enhanced error handling
+						if (updateFields.cf !== undefined) {
+							body.cf = parseCustomFields(updateFields.cf);
+						}
+
 						// Add other update fields
-						if (updateFields.accountId !== undefined) {
-							body.accountId = updateFields.accountId;
-						}
-						if (updateFields.assigneeId !== undefined) {
-							body.assigneeId = updateFields.assigneeId;
-						}
-						if (updateFields.category !== undefined) {
-							body.category = updateFields.category;
-						}
-						if (updateFields.channel !== undefined) {
-							body.channel = updateFields.channel;
-						}
-						if (updateFields.classification !== undefined) {
-							body.classification = updateFields.classification;
-						}
-						if (updateFields.contactId !== undefined) {
-							body.contactId = updateFields.contactId;
-						}
-						if (updateFields.departmentId !== undefined) {
-							body.departmentId = updateFields.departmentId;
-						}
-						if (updateFields.email !== undefined) {
-							body.email = updateFields.email;
-						}
-						if (updateFields.language !== undefined) {
-							body.language = updateFields.language;
-						}
-						if (updateFields.phone !== undefined) {
-							body.phone = updateFields.phone;
-						}
-						if (updateFields.productId !== undefined) {
-							body.productId = updateFields.productId;
-						}
-						if (updateFields.resolution !== undefined) {
-							body.resolution = updateFields.resolution;
-						}
-						if (updateFields.status !== undefined) {
-							body.status = updateFields.status;
-						}
-						if (updateFields.subCategory !== undefined) {
-							body.subCategory = updateFields.subCategory;
-						}
-						if (updateFields.subject !== undefined) {
-							body.subject = updateFields.subject;
-						}
+						addOptionalFields(body, updateFields, [
+							'accountId',
+							'assigneeId',
+							'category',
+							'channel',
+							'classification',
+							'contactId',
+							'departmentId',
+							'email',
+							'language',
+							'phone',
+							'productId',
+							'resolution',
+							'status',
+							'subCategory',
+							'subject',
+							'teamId',
+						]);
+
+						// Handle tags with filtering of empty values
 						if (updateFields.tags !== undefined) {
-							body.tags = (updateFields.tags as string).split(',').map(tag => tag.trim());
-						}
-						if (updateFields.teamId !== undefined) {
-							body.teamId = updateFields.teamId;
+							const tags = parseCommaSeparatedList(updateFields.tags as string);
+							if (tags.length > 0) {
+								body.tags = tags;
+							}
 						}
 
 						const options = {
