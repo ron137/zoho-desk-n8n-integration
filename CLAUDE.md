@@ -21,6 +21,24 @@ npm run lint         # ESLint check on nodes/ and credentials/
 npm run format       # Prettier formatting for nodes/ and credentials/
 ```
 
+### Publishing
+```bash
+# Version management
+npm run version:patch  # Bump patch version (0.1.3 → 0.1.4)
+npm run version:minor  # Bump minor version (0.1.3 → 0.2.0)
+npm run version:major  # Bump major version (0.1.3 → 1.0.0)
+
+# Publish to npm (version bump + publish in one command)
+npm run publish:patch  # Bump patch and publish
+npm run publish:minor  # Bump minor and publish
+npm run publish:major  # Bump major and publish
+
+# Manual publish
+npm publish           # Publish current version (after version bump)
+```
+
+**Important**: `prepublishOnly` hook automatically runs `npm run build` before publishing, ensuring compiled code is up to date.
+
 ### Build System
 The project uses both TypeScript compiler and Gulp:
 - `tsc` compiles TypeScript files from `nodes/` and `credentials/` to `dist/`

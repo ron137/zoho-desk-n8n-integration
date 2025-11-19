@@ -203,6 +203,38 @@ pnpm test
 pnpm lint
 ```
 
+### Publishing to npm
+
+Before publishing, ensure you're logged into npm with appropriate permissions:
+
+```bash
+# Login to npm (one-time setup)
+npm login
+
+# Publish with patch version bump (0.1.3 → 0.1.4)
+npm run publish:patch
+
+# Publish with minor version bump (0.1.3 → 0.2.0)
+npm run publish:minor
+
+# Publish with major version bump (0.1.3 → 1.0.0)
+npm run publish:major
+```
+
+**Manual publishing process:**
+
+```bash
+# 1. Update version (choose one)
+npm run version:patch  # For bug fixes
+npm run version:minor  # For new features
+npm run version:major  # For breaking changes
+
+# 2. Publish to npm
+npm publish
+```
+
+**Note:** The `prepublishOnly` script automatically runs the build before publishing, ensuring the latest code is included.
+
 ## License
 
 MIT
