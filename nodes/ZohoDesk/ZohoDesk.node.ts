@@ -32,11 +32,55 @@ interface ZohoDeskListResponse<T> {
 }
 
 /**
+ * Optional fields for ticket create operation
+ */
+const TICKET_CREATE_OPTIONAL_FIELDS = [
+	'accountId',
+	'assigneeId',
+	'category',
+	'channel',
+	'classification',
+	'email',
+	'language',
+	'phone',
+	'productId',
+	'resolution',
+	'status',
+	'subCategory',
+	'teamId',
+] as const;
+
+/**
+ * Optional fields for ticket update operation
+ */
+const TICKET_UPDATE_OPTIONAL_FIELDS = [
+	'accountId',
+	'assigneeId',
+	'category',
+	'channel',
+	'classification',
+	'contactId',
+	'departmentId',
+	'email',
+	'language',
+	'phone',
+	'productId',
+	'resolution',
+	'status',
+	'subCategory',
+	'subject',
+	'teamId',
+] as const;
+
+/**
  * Parse comma-separated list and filter out empty values
- * @param value - Comma-separated string
+ * @param value - Comma-separated string (can be undefined)
  * @returns Array of trimmed non-empty values
  */
-function parseCommaSeparatedList(value: string): string[] {
+function parseCommaSeparatedList(value: string | undefined): string[] {
+	if (!value) {
+		return [];
+	}
 	return value
 		.split(',')
 		.map((item) => item.trim())
@@ -56,8 +100,9 @@ function parseCustomFields(cf: unknown): IDataObject {
 		}
 		return cf as IDataObject;
 	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error);
 		throw new Error(
-			`Custom fields must be valid JSON. Parse error: ${error.message}. ` +
+			`Custom fields must be valid JSON. Parse error: ${errorMessage}. ` +
 				`Please ensure your JSON is properly formatted, e.g., {"cf_field": "value"}`,
 		);
 	}
@@ -72,7 +117,7 @@ function parseCustomFields(cf: unknown): IDataObject {
 function addOptionalFields(
 	body: IDataObject,
 	source: IDataObject,
-	fields: string[],
+	fields: readonly string[],
 ): void {
 	for (const field of fields) {
 		if (source[field] !== undefined) {
@@ -84,11 +129,12 @@ function addOptionalFields(
 /**
  * Validate ticket ID format
  * @param ticketId - Ticket ID to validate
- * @returns True if ticket ID is valid (numeric), false otherwise
+ * @returns True if ticket ID is valid (numeric with proper length), false otherwise
  */
 function isValidTicketId(ticketId: string): boolean {
-	// Ticket IDs in Zoho Desk are numeric strings
-	return /^\d+$/.test(ticketId.trim());
+	const trimmed = ticketId.trim();
+	// Zoho Desk ticket IDs are typically 16-19 digit numeric strings
+	return /^\d{10,20}$/.test(trimmed);
 }
 
 export class ZohoDesk implements INodeType {
@@ -728,8 +774,12 @@ export class ZohoDesk implements INodeType {
 					options,
 				) as ZohoDeskListResponse<ZohoDeskDepartment>;
 
-				const departments = response.data || [];
-				return departments.map((department) => ({
+				// Validate response structure
+				if (!response || !Array.isArray(response.data)) {
+					return [];
+				}
+
+				return response.data.map((department) => ({
 					name: department.name,
 					value: department.id,
 				}));
@@ -765,15 +815,18 @@ export class ZohoDesk implements INodeType {
 						options,
 					) as ZohoDeskListResponse<ZohoDeskTeam>;
 
-					const teams = response.data || [];
-					return teams.map((team) => ({
+					// Validate response structure
+					if (!response || !Array.isArray(response.data)) {
+						return [];
+					}
+
+					return response.data.map((team) => ({
 						name: team.name,
 						value: team.id,
 					}));
 				} catch (error) {
 					// Return empty array if department has no teams or if there's an API error
 					// This prevents the UI from breaking when a department has no teams
-					console.warn(`Failed to load teams for department ${departmentId}: ${error.message}`);
 					return [];
 				}
 			},
@@ -807,8 +860,15 @@ export class ZohoDesk implements INodeType {
 						};
 
 						// Handle and validate contact object
-						if (contactData && contactData.contactValues) {
+						if (contactData && typeof contactData === 'object' && contactData.contactValues) {
 							const contactValues = contactData.contactValues as IDataObject;
+
+							// Type guard for contactValues
+							if (typeof contactValues !== 'object' || contactValues === null) {
+								throw new Error(
+									'Contact validation failed: Invalid contact data format',
+								);
+							}
 
 							// Validate that at least email or lastName is provided
 							if (!contactValues.email && !contactValues.lastName) {
@@ -851,21 +911,7 @@ export class ZohoDesk implements INodeType {
 						}
 
 						// Add other additional fields
-						addOptionalFields(body, additionalFields, [
-							'accountId',
-							'assigneeId',
-							'category',
-							'channel',
-							'classification',
-							'email',
-							'language',
-							'phone',
-							'productId',
-							'resolution',
-							'status',
-							'subCategory',
-							'teamId',
-						]);
+						addOptionalFields(body, additionalFields, TICKET_CREATE_OPTIONAL_FIELDS);
 
 						// Handle tags with filtering of empty values
 						if (additionalFields.tags) {
@@ -930,24 +976,7 @@ export class ZohoDesk implements INodeType {
 						}
 
 						// Add other update fields
-						addOptionalFields(body, updateFields, [
-							'accountId',
-							'assigneeId',
-							'category',
-							'channel',
-							'classification',
-							'contactId',
-							'departmentId',
-							'email',
-							'language',
-							'phone',
-							'productId',
-							'resolution',
-							'status',
-							'subCategory',
-							'subject',
-							'teamId',
-						]);
+						addOptionalFields(body, updateFields, TICKET_UPDATE_OPTIONAL_FIELDS);
 
 						// Handle tags with filtering of empty values
 						if (updateFields.tags !== undefined) {
