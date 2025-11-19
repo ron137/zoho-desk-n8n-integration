@@ -134,7 +134,34 @@ function addOptionalFields(
 function isValidTicketId(ticketId: string): boolean {
 	const trimmed = ticketId.trim();
 	// Zoho Desk ticket IDs are typically 16-19 digit numeric strings
-	return /^\d{10,20}$/.test(trimmed);
+	return /^\d{16,19}$/.test(trimmed);
+}
+
+/**
+ * Add common ticket fields (description, dueDate, priority, secondaryContacts, custom fields)
+ * This eliminates code duplication between create and update operations
+ * @param body - Target object to add fields to
+ * @param fields - Source object containing field values
+ */
+function addCommonTicketFields(body: IDataObject, fields: IDataObject): void {
+	if (fields.description !== undefined) {
+		body.description = fields.description;
+	}
+	if (fields.dueDate !== undefined) {
+		body.dueDate = fields.dueDate;
+	}
+	if (fields.priority !== undefined) {
+		body.priority = fields.priority;
+	}
+	if (fields.secondaryContacts !== undefined) {
+		const contacts = parseCommaSeparatedList(fields.secondaryContacts as string);
+		if (contacts.length > 0) {
+			body.secondaryContacts = contacts;
+		}
+	}
+	if (fields.cf !== undefined) {
+		body.cf = parseCustomFields(fields.cf);
+	}
 }
 
 export class ZohoDesk implements INodeType {
@@ -478,7 +505,7 @@ export class ZohoDesk implements INodeType {
 						name: 'status',
 						type: 'string',
 						default: 'Open',
-						description: 'Status of the ticket',
+						description: 'Status of the ticket (default: Open for new tickets)',
 					},
 					{
 						displayName: 'Sub Category',
@@ -708,7 +735,7 @@ export class ZohoDesk implements INodeType {
 						name: 'status',
 						type: 'string',
 						default: '',
-						description: 'Status of the ticket',
+						description: 'Status of the ticket (leave empty to keep current status)',
 					},
 					{
 						displayName: 'Sub Category',
@@ -757,7 +784,7 @@ export class ZohoDesk implements INodeType {
 			async getDepartments(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				const credentials = await this.getCredentials('zohoDeskOAuth2Api');
 				const orgId = credentials.orgId as string;
-				const baseUrl = credentials.baseUrl || 'https://desk.zoho.com/api/v1';
+				const baseUrl = (credentials.baseUrl as string | undefined) || 'https://desk.zoho.com/api/v1';
 
 				const options = {
 					method: 'GET',
@@ -792,7 +819,7 @@ export class ZohoDesk implements INodeType {
 			async getTeams(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				const credentials = await this.getCredentials('zohoDeskOAuth2Api');
 				const orgId = credentials.orgId as string;
-				const baseUrl = credentials.baseUrl || 'https://desk.zoho.com/api/v1';
+				const baseUrl = (credentials.baseUrl as string | undefined) || 'https://desk.zoho.com/api/v1';
 				const departmentId = this.getCurrentNodeParameter('departmentId') as string;
 
 				if (!departmentId) {
@@ -842,7 +869,7 @@ export class ZohoDesk implements INodeType {
 		// Fetch credentials once for all items (optimization)
 		const credentials = await this.getCredentials('zohoDeskOAuth2Api');
 		const orgId = credentials.orgId as string;
-		const baseUrl = (credentials.baseUrl as string) || 'https://desk.zoho.com/api/v1';
+		const baseUrl = (credentials.baseUrl as string | undefined) || 'https://desk.zoho.com/api/v1';
 
 		for (let i = 0; i < items.length; i++) {
 			try {
@@ -860,23 +887,29 @@ export class ZohoDesk implements INodeType {
 						};
 
 						// Handle and validate contact object
+						// Contact auto-creation flow:
+						// 1. If email exists in Zoho Desk → Existing contact is used
+						// 2. If email doesn't exist → New contact is created with provided details
+						// 3. Either email OR lastName must be provided (Zoho Desk requirement)
 						if (contactData && typeof contactData === 'object' && contactData.contactValues) {
 							const contactValues = contactData.contactValues as IDataObject;
 
-							// Type guard for contactValues
-							if (typeof contactValues !== 'object' || contactValues === null) {
+							// Type guard for contactValues (exclude arrays since they're technically objects)
+							if (typeof contactValues !== 'object' || contactValues === null || Array.isArray(contactValues)) {
 								throw new Error(
 									'Contact validation failed: Invalid contact data format',
 								);
 							}
 
-							// Validate that at least email or lastName is provided
+							// Validate that at least email or lastName is provided (Zoho Desk API requirement)
 							if (!contactValues.email && !contactValues.lastName) {
 								throw new Error(
 									'Contact validation failed: Either email or lastName must be provided for the contact',
 								);
 							}
 
+							// Build contact object with available fields
+							// Zoho Desk will automatically match by email or create new contact
 							if (contactValues.email || contactValues.lastName) {
 								const contact: IDataObject = {};
 								if (contactValues.email) contact.email = contactValues.email;
@@ -888,27 +921,8 @@ export class ZohoDesk implements INodeType {
 							}
 						}
 
-						// Add description, dueDate, priority, secondaryContacts
-						if (additionalFields.description) {
-							body.description = additionalFields.description;
-						}
-						if (additionalFields.dueDate) {
-							body.dueDate = additionalFields.dueDate;
-						}
-						if (additionalFields.priority) {
-							body.priority = additionalFields.priority;
-						}
-						if (additionalFields.secondaryContacts) {
-							const contacts = parseCommaSeparatedList(additionalFields.secondaryContacts as string);
-							if (contacts.length > 0) {
-								body.secondaryContacts = contacts;
-							}
-						}
-
-						// Add custom fields with enhanced error handling
-						if (additionalFields.cf) {
-							body.cf = parseCustomFields(additionalFields.cf);
-						}
+						// Add common fields (description, dueDate, priority, secondaryContacts, custom fields)
+						addCommonTicketFields(body, additionalFields);
 
 						// Add other additional fields
 						addOptionalFields(body, additionalFields, TICKET_CREATE_OPTIONAL_FIELDS);
@@ -953,27 +967,8 @@ export class ZohoDesk implements INodeType {
 
 						const body: IDataObject = {};
 
-						// Add description, dueDate, priority, secondaryContacts
-						if (updateFields.description !== undefined) {
-							body.description = updateFields.description;
-						}
-						if (updateFields.dueDate !== undefined) {
-							body.dueDate = updateFields.dueDate;
-						}
-						if (updateFields.priority !== undefined) {
-							body.priority = updateFields.priority;
-						}
-						if (updateFields.secondaryContacts !== undefined) {
-							const contacts = parseCommaSeparatedList(updateFields.secondaryContacts as string);
-							if (contacts.length > 0) {
-								body.secondaryContacts = contacts;
-							}
-						}
-
-						// Add custom fields with enhanced error handling
-						if (updateFields.cf !== undefined) {
-							body.cf = parseCustomFields(updateFields.cf);
-						}
+						// Add common fields (description, dueDate, priority, secondaryContacts, custom fields)
+						addCommonTicketFields(body, updateFields);
 
 						// Add other update fields
 						addOptionalFields(body, updateFields, TICKET_UPDATE_OPTIONAL_FIELDS);
