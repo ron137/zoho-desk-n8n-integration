@@ -434,7 +434,20 @@ function addCommonTicketFields(
     if (fields.dueDate !== undefined) {
       // Convert ISO 8601 string to milliseconds timestamp for Zoho Desk API
       const dueDateValue = fields.dueDate as string;
-      body.dueDate = dueDateValue ? new Date(dueDateValue).getTime() : '';
+      if (dueDateValue && dueDateValue.trim() !== '') {
+        const timestamp = new Date(dueDateValue).getTime();
+        if (isNaN(timestamp)) {
+          throw new Error(
+            `Invalid due date format: "${dueDateValue}". Expected ISO 8601 format (e.g., "2025-11-20T10:30:00.000Z"). ` +
+              'See: ' +
+              ZOHO_DESK_UPDATE_TICKET_DOCS,
+          );
+        }
+        body.dueDate = timestamp;
+      } else {
+        // Empty string means "no change" for update operation
+        body.dueDate = '';
+      }
     }
     if (fields.priority !== undefined) {
       body.priority = fields.priority;
@@ -1263,7 +1276,15 @@ export class ZohoDesk implements INodeType {
             // Add dueDate if provided - convert ISO 8601 string to milliseconds timestamp
             if (dueDate) {
               // n8n dateTime field returns ISO 8601 string, Zoho Desk API expects milliseconds timestamp
-              body.dueDate = new Date(dueDate).getTime();
+              const timestamp = new Date(dueDate).getTime();
+              if (isNaN(timestamp)) {
+                throw new Error(
+                  `Invalid due date format: "${dueDate}". Expected ISO 8601 format (e.g., "2025-11-20T10:30:00.000Z"). ` +
+                    'See: ' +
+                    ZOHO_DESK_CREATE_TICKET_DOCS,
+                );
+              }
+              body.dueDate = timestamp;
             }
 
             // Add description if provided
