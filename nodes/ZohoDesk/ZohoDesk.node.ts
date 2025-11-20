@@ -47,9 +47,9 @@ interface ZohoDeskTeamsResponse {
 
 /**
  * Optional fields for ticket create operation
- * Note: Some fields like 'secondaryContacts', 'cf', and 'tags'
+ * Note: Some fields like 'secondaryContacts' and 'cf'
  * are handled separately with custom parsing logic (see addCommonTicketFields function)
- * Note: 'priority', 'classification', 'dueDate', 'description', 'tags', and 'teamId' are primary fields for create operation
+ * Note: 'priority', 'classification', 'dueDate', 'description', and 'teamId' are primary fields for create operation
  */
 const TICKET_CREATE_OPTIONAL_FIELDS = [
   'accountId',
@@ -67,7 +67,7 @@ const TICKET_CREATE_OPTIONAL_FIELDS = [
 
 /**
  * Optional fields for ticket update operation
- * Note: Some fields like 'dueDate', 'priority', 'secondaryContacts', 'cf', and 'tags'
+ * Note: Some fields like 'dueDate', 'priority', 'secondaryContacts', and 'cf'
  * are handled separately with custom parsing logic (see addCommonTicketFields function)
  * Note: 'description' is now a primary field for update operation
  * Note: 'channel' is not updatable - it represents how the ticket was originally created
@@ -432,7 +432,9 @@ function addCommonTicketFields(
   // For create operation, these are primary fields set separately
   if (includePriorityAndDueDate) {
     if (fields.dueDate !== undefined) {
-      body.dueDate = fields.dueDate;
+      // Convert ISO 8601 string to milliseconds timestamp for Zoho Desk API
+      const dueDateValue = fields.dueDate as string;
+      body.dueDate = dueDateValue ? new Date(dueDateValue).getTime() : '';
     }
     if (fields.priority !== undefined) {
       body.priority = fields.priority;
@@ -545,7 +547,7 @@ export class ZohoDesk implements INodeType {
         },
         default: '',
         description:
-          'The team assigned to the ticket. Note: Teams will only load if Department is selected first. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+          'The team assigned to resolve the ticket. Teams will only load if Department is selected first. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
       },
       {
         displayName: 'Subject',
@@ -603,13 +605,6 @@ export class ZohoDesk implements INodeType {
                 type: 'string',
                 default: '',
                 description: 'Last name of the contact (required if email is not provided)',
-              },
-              {
-                displayName: 'Mobile',
-                name: 'mobile',
-                type: 'string',
-                default: '',
-                description: 'Mobile number of the contact',
               },
               {
                 displayName: 'Phone',
@@ -708,20 +703,6 @@ export class ZohoDesk implements INodeType {
         },
         default: '',
         description: 'Description of the ticket',
-      },
-      {
-        displayName: 'Tags',
-        name: 'tags',
-        type: 'string',
-        displayOptions: {
-          show: {
-            resource: ['ticket'],
-            operation: ['create'],
-          },
-        },
-        default: '',
-        description: 'Comma-separated list of tags associated with the ticket',
-        placeholder: 'urgent, customer-service, billing',
       },
       {
         displayName: 'Additional Fields',
@@ -1091,14 +1072,6 @@ export class ZohoDesk implements INodeType {
             description: 'Subject of the ticket',
           },
           {
-            displayName: 'Tags',
-            name: 'tags',
-            type: 'string',
-            default: '',
-            description: 'Comma-separated list of tags associated with the ticket',
-            placeholder: 'urgent, customer-service, billing',
-          },
-          {
             displayName: 'Team Name or ID',
             name: 'teamId',
             type: 'options',
@@ -1269,7 +1242,6 @@ export class ZohoDesk implements INodeType {
             const classification = this.getNodeParameter('classification', i) as string;
             const dueDate = this.getNodeParameter('dueDate', i) as string;
             const description = this.getNodeParameter('description', i) as string;
-            const tags = this.getNodeParameter('tags', i) as string;
             const additionalFields = this.getNodeParameter('additionalFields', i) as IDataObject;
 
             // Validate length for subject (XSS protection handled by Zoho Desk API)
@@ -1283,14 +1255,15 @@ export class ZohoDesk implements INodeType {
               classification,
             };
 
-            // Add teamId if provided (optional field)
-            if (teamId) {
+            // Add teamId if provided (optional field, same level as departmentId)
+            if (teamId && teamId.trim() !== '') {
               body.teamId = teamId;
             }
 
-            // Add dueDate if provided
+            // Add dueDate if provided - convert ISO 8601 string to milliseconds timestamp
             if (dueDate) {
-              body.dueDate = dueDate;
+              // n8n dateTime field returns ISO 8601 string, Zoho Desk API expects milliseconds timestamp
+              body.dueDate = new Date(dueDate).getTime();
             }
 
             // Add description if provided
@@ -1340,10 +1313,9 @@ export class ZohoDesk implements INodeType {
                 addContactField(contact, contactValues, 'lastName', 'lastName', undefined);
                 addContactField(contact, contactValues, 'firstName', 'firstName', undefined);
                 addContactField(contact, contactValues, 'phone', 'phone', undefined);
-                addContactField(contact, contactValues, 'mobile', 'mobile', undefined);
 
                 // Validation: if contact has values, ensure at least email or lastName is present
-                // This catches edge cases where only firstName/phone/mobile are provided
+                // This catches edge cases where only firstName/phone are provided
                 if (!contact.email && !contact.lastName) {
                   throw new Error(
                     'Contact validation failed: Either email or lastName must be provided. ' +
@@ -1363,18 +1335,6 @@ export class ZohoDesk implements INodeType {
 
             // Add other additional fields
             addOptionalFields(body, additionalFields, TICKET_CREATE_OPTIONAL_FIELDS);
-
-            // Handle tags with filtering of empty values and CRLF sanitization
-            // Tags is now a primary field for create operation
-            // No length limit - let Zoho Desk API validate
-            if (tags && typeof tags === 'string') {
-              const parsedTags = parseCommaSeparatedList(tags).map((tag) =>
-                validateFieldLength(tag, undefined, 'Tag'),
-              );
-              if (parsedTags.length > 0) {
-                body.tags = parsedTags;
-              }
-            }
 
             const options = {
               method: 'POST',
@@ -1425,17 +1385,6 @@ export class ZohoDesk implements INodeType {
               body.description = validateFieldLength(description, undefined, 'Description');
             }
             addOptionalFields(body, updateFields, TICKET_UPDATE_OPTIONAL_FIELDS);
-
-            // Handle tags with filtering of empty values and CRLF sanitization
-            // No length limit - let Zoho Desk API validate
-            if (updateFields.tags !== undefined && typeof updateFields.tags === 'string') {
-              const tags = parseCommaSeparatedList(updateFields.tags).map((tag) =>
-                validateFieldLength(tag, undefined, 'Tag'),
-              );
-              if (tags.length > 0) {
-                body.tags = tags;
-              }
-            }
 
             const options = {
               method: 'PATCH',
