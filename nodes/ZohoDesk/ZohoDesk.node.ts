@@ -353,6 +353,38 @@ function validateFieldLength(value: string, maxLength?: number, fieldName?: stri
 }
 
 /**
+ * Convert ISO 8601 date string to milliseconds timestamp for Zoho Desk API
+ *
+ * @param dateString - ISO 8601 formatted date string (e.g., "2025-11-20T10:30:00.000Z")
+ * @param fieldName - Field name for error messages (e.g., "Due Date")
+ * @param docsUrl - URL to Zoho Desk API documentation for error messages
+ * @returns Milliseconds timestamp (e.g., 1732098600000)
+ * @throws Error if dateString is invalid or cannot be parsed
+ */
+function convertDateToTimestamp(dateString: string, fieldName: string, docsUrl: string): number {
+  // Validate that date string is not empty or whitespace-only
+  if (!dateString || dateString.trim() === '') {
+    throw new Error(
+      `${fieldName} cannot be empty. Expected ISO 8601 format (e.g., "2025-11-20T10:30:00.000Z"). ` +
+        'See: ' +
+        docsUrl,
+    );
+  }
+
+  // Convert to timestamp and validate
+  const timestamp = new Date(dateString).getTime();
+  if (isNaN(timestamp)) {
+    throw new Error(
+      `Invalid ${fieldName} format: "${dateString}". Expected ISO 8601 format (e.g., "2025-11-20T10:30:00.000Z"). ` +
+        'See: ' +
+        docsUrl,
+    );
+  }
+
+  return timestamp;
+}
+
+/**
  * Validate email format using RFC 5322 compliant regex (simplified version)
  * @param email - Email address to validate
  * @returns True if email format is valid
@@ -432,18 +464,14 @@ function addCommonTicketFields(
   // For create operation, these are primary fields set separately
   if (includePriorityAndDueDate) {
     if (fields.dueDate !== undefined) {
-      // Convert ISO 8601 string to milliseconds timestamp for Zoho Desk API
       const dueDateValue = fields.dueDate as string;
       if (dueDateValue && dueDateValue.trim() !== '') {
-        const timestamp = new Date(dueDateValue).getTime();
-        if (isNaN(timestamp)) {
-          throw new Error(
-            `Invalid due date format: "${dueDateValue}". Expected ISO 8601 format (e.g., "2025-11-20T10:30:00.000Z"). ` +
-              'See: ' +
-              ZOHO_DESK_UPDATE_TICKET_DOCS,
-          );
-        }
-        body.dueDate = timestamp;
+        // Convert ISO 8601 string to milliseconds timestamp for Zoho Desk API
+        body.dueDate = convertDateToTimestamp(
+          dueDateValue,
+          'Due Date',
+          ZOHO_DESK_UPDATE_TICKET_DOCS,
+        );
       } else {
         // Empty string means "no change" for update operation
         body.dueDate = '';
@@ -1276,15 +1304,11 @@ export class ZohoDesk implements INodeType {
             // Add dueDate if provided - convert ISO 8601 string to milliseconds timestamp
             if (dueDate && dueDate.trim() !== '') {
               // n8n dateTime field returns ISO 8601 string, Zoho Desk API expects milliseconds timestamp
-              const timestamp = new Date(dueDate).getTime();
-              if (isNaN(timestamp)) {
-                throw new Error(
-                  `Invalid due date format: "${dueDate}". Expected ISO 8601 format (e.g., "2025-11-20T10:30:00.000Z"). ` +
-                    'See: ' +
-                    ZOHO_DESK_CREATE_TICKET_DOCS,
-                );
-              }
-              body.dueDate = timestamp;
+              body.dueDate = convertDateToTimestamp(
+                dueDate,
+                'Due Date',
+                ZOHO_DESK_CREATE_TICKET_DOCS,
+              );
             }
 
             // Add description if provided
