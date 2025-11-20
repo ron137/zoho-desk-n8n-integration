@@ -61,13 +61,13 @@ const TICKET_CREATE_OPTIONAL_FIELDS = [
  * Optional fields for ticket update operation
  * Note: Some fields like 'description', 'dueDate', 'priority', 'secondaryContacts', 'cf', and 'tags'
  * are handled separately with custom parsing logic (see addCommonTicketFields function)
+ * Note: 'channel' is not updatable - it represents how the ticket was originally created
+ * Note: 'classification' is now handled as an options field with "No Change" option
  */
 const TICKET_UPDATE_OPTIONAL_FIELDS = [
 	'accountId',
 	'assigneeId',
 	'category',
-	'channel',
-	'classification',
 	'contactId',
 	'departmentId',
 	'email',
@@ -882,6 +882,10 @@ export class ZohoDesk implements INodeType {
 						type: 'options',
 						options: [
 							{
+								name: 'No Change',
+								value: '',
+							},
+							{
 								name: 'Low',
 								value: 'Low',
 							},
@@ -895,7 +899,7 @@ export class ZohoDesk implements INodeType {
 							},
 						],
 						default: '',
-						description: 'Priority of the ticket (leave empty to keep current priority)',
+						description: 'Priority of the ticket',
 					},
 					{
 						displayName: 'Secondary Contacts',
@@ -935,51 +939,14 @@ export class ZohoDesk implements INodeType {
 						description: 'Category to which the ticket belongs',
 					},
 					{
-						displayName: 'Channel',
-						name: 'channel',
-						type: 'options',
-						options: [
-							{
-								name: 'Email',
-								value: 'EMAIL',
-							},
-							{
-								name: 'Phone',
-								value: 'PHONE',
-							},
-							{
-								name: 'Twitter',
-								value: 'TWITTER',
-							},
-							{
-								name: 'Facebook',
-								value: 'FACEBOOK',
-							},
-							{
-								name: 'Chat',
-								value: 'CHAT',
-							},
-							{
-								name: 'Forums',
-								value: 'FORUMS',
-							},
-							{
-								name: 'Feedback Widget',
-								value: 'FEEDBACK_WIDGET',
-							},
-							{
-								name: 'Web',
-								value: 'WEB',
-							},
-						],
-						default: 'EMAIL',
-						description: 'The channel through which the ticket was created',
-					},
-					{
 						displayName: 'Classification',
 						name: 'classification',
 						type: 'options',
 						options: [
+							{
+								name: 'No Change',
+								value: '',
+							},
 							{
 								name: 'Question',
 								value: 'Question',
@@ -998,7 +965,7 @@ export class ZohoDesk implements INodeType {
 							},
 						],
 						default: '',
-						description: 'Classification of the ticket (leave empty to keep current classification)',
+						description: 'Classification of the ticket',
 					},
 					{
 						displayName: 'Contact ID',

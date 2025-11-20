@@ -71,10 +71,10 @@ This package follows n8n's community node architecture:
 - Base API: `https://desk.zoho.{{$self["datacenter"]}}/api/v1`
 
 **Field Mapping**: The node uses two separate field collections:
-- **Create operation**: `departmentId` and `subject` are required. Contact details are optional (via `contact` fixed collection).
-- **Update operation**: `ticketId` is required, all other fields are optional via `updateFields`.
+- **Create operation**: Required fields are `departmentId` and `subject`. Primary fields are `priority` (default: Medium), `classification` (default: Question), and `dueDate` (optional). Contact details are optional (via `contact` fixed collection).
+- **Update operation**: `ticketId` is required, all other fields are optional via `updateFields`. Update fields include `priority`, `classification`, and `dueDate` with "No Change" option (empty string) to keep current values. Note: `channel` is NOT updatable as it represents how the ticket was originally created.
 
-Both operations support many optional fields including description, dueDate, priority, secondaryContacts, and custom fields (cf).
+Both operations support many optional fields including description, secondaryContacts, and custom fields (cf).
 
 **Dynamic Resource Loading**: The node uses `loadOptionsMethod` to fetch:
 - Departments list from `/departments` endpoint
