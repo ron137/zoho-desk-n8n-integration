@@ -114,22 +114,25 @@ const DEFAULT_BASE_URL = `https://desk.zoho.com/api/${ZOHO_DESK_API_VERSION}`;
  * protection for fields with known constraints.
  */
 const FIELD_LENGTH_LIMITS = {
-	email: 254,  // RFC 5321 maximum email length - official standard
+	email: 254, // RFC 5321 maximum email length - official standard
 } as const;
 
 /**
  * Pre-compiled regex patterns for performance optimization
  */
 const N8N_EXPRESSION_PATTERN = /\{\{.+?\}\}/;
-const RFC5322_EMAIL_PATTERN = /^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+const RFC5322_EMAIL_PATTERN =
+	/^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
 const ZOHO_DESK_ID_PATTERN = /^\d{10,}$/;
 const TICKET_ID_PATTERN = new RegExp(`^\\d{${MIN_TICKET_ID_LENGTH},}$`);
 
 /**
  * Zoho Desk API documentation URLs
  */
-const ZOHO_DESK_CREATE_TICKET_DOCS = 'https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket';
-const ZOHO_DESK_UPDATE_TICKET_DOCS = 'https://desk.zoho.com/support/APIDocument#Tickets#Tickets_UpdateTicket';
+const ZOHO_DESK_CREATE_TICKET_DOCS =
+	'https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket';
+const ZOHO_DESK_UPDATE_TICKET_DOCS =
+	'https://desk.zoho.com/support/APIDocument#Tickets#Tickets_UpdateTicket';
 
 /**
  * HTTP error interface for proper error type handling
@@ -182,7 +185,8 @@ function parseCustomFields(cf: unknown): IDataObject {
 		if (!isPlainObject(parsed)) {
 			throw new Error(
 				'Custom fields must be a JSON object, not an array or primitive value. ' +
-				'See: ' + ZOHO_DESK_CREATE_TICKET_DOCS
+					'See: ' +
+					ZOHO_DESK_CREATE_TICKET_DOCS,
 			);
 		}
 
@@ -201,10 +205,11 @@ function parseCustomFields(cf: unknown): IDataObject {
 		return sanitized;
 	} catch (error) {
 		// Check if error is already a validation error from isPlainObject check or validateFieldLength
-		if (error instanceof Error && (
-			error.message.includes('Custom fields must be a JSON object') ||
-			error.message.includes('exceeds maximum length')
-		)) {
+		if (
+			error instanceof Error &&
+			(error.message.includes('Custom fields must be a JSON object') ||
+				error.message.includes('exceeds maximum length'))
+		) {
 			// Re-throw validation errors without wrapping to preserve specific details
 			throw error;
 		}
@@ -213,8 +218,9 @@ function parseCustomFields(cf: unknown): IDataObject {
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		throw new Error(
 			`Custom fields must be valid JSON. Parse error: ${errorMessage}. ` +
-			`Please ensure your JSON is properly formatted, e.g., {"cf_field": "value"}. ` +
-			'See: ' + ZOHO_DESK_CREATE_TICKET_DOCS,
+				`Please ensure your JSON is properly formatted, e.g., {"cf_field": "value"}. ` +
+				'See: ' +
+				ZOHO_DESK_CREATE_TICKET_DOCS,
 		);
 	}
 }
@@ -245,9 +251,10 @@ function addOptionalFields(
 				}
 
 				// Apply length limits from FIELD_LENGTH_LIMITS or use undefined for no limit
-				const maxLength = field in FIELD_LENGTH_LIMITS
-					? FIELD_LENGTH_LIMITS[field as keyof typeof FIELD_LENGTH_LIMITS]
-					: undefined;
+				const maxLength =
+					field in FIELD_LENGTH_LIMITS
+						? FIELD_LENGTH_LIMITS[field as keyof typeof FIELD_LENGTH_LIMITS]
+						: undefined;
 				body[field] = validateFieldLength(stringValue, maxLength, fieldDisplayName);
 			} else {
 				body[field] = source[field];
@@ -296,7 +303,7 @@ function isValidZohoDeskId(id: string, fieldName: string): boolean {
 	if (!ZOHO_DESK_ID_PATTERN.test(trimmed)) {
 		throw new Error(
 			`Invalid ${fieldName} format: "${trimmed}". ` +
-			`${fieldName} must be a numeric value with at least 10 digits.`,
+				`${fieldName} must be a numeric value with at least 10 digits.`,
 		);
 	}
 
@@ -329,7 +336,7 @@ function validateFieldLength(value: string, maxLength?: number, fieldName?: stri
 	if (maxLength && value.length > maxLength) {
 		throw new Error(
 			`${fieldName || 'Field'} exceeds maximum length of ${maxLength} characters (${value.length} provided). ` +
-			'Please shorten your input and try again.',
+				'Please shorten your input and try again.',
 		);
 	}
 
@@ -371,7 +378,8 @@ function addContactField(
 	if (fieldType !== 'string' && fieldType !== 'number') {
 		throw new Error(
 			`Contact validation failed: ${fieldLabel} must be a string or number, not a complex object. ` +
-			'See: ' + ZOHO_DESK_CREATE_TICKET_DOCS,
+				'See: ' +
+				ZOHO_DESK_CREATE_TICKET_DOCS,
 		);
 	}
 
@@ -386,7 +394,8 @@ function addContactField(
 		if (fieldName === 'email' && !isValidEmail(cleaned)) {
 			throw new Error(
 				`Contact validation failed: Invalid email format "${cleaned}". ` +
-				'See: ' + ZOHO_DESK_CREATE_TICKET_DOCS,
+					'See: ' +
+					ZOHO_DESK_CREATE_TICKET_DOCS,
 			);
 		}
 
@@ -403,13 +412,18 @@ function addContactField(
  *                                     For create operation: priority and dueDate are primary fields, not in additionalFields
  *                                     For update operation: priority and dueDate are optional fields in updateFields
  */
-function addCommonTicketFields(body: IDataObject, fields: IDataObject, includePriorityAndDueDate = true): void {
+function addCommonTicketFields(
+	body: IDataObject,
+	fields: IDataObject,
+	includePriorityAndDueDate = true,
+): void {
 	if (fields.description !== undefined) {
 		// Validate length for description (XSS protection handled by Zoho Desk API)
 		// No length limit - let Zoho Desk API validate
-		body.description = typeof fields.description === 'string'
-			? validateFieldLength(fields.description, undefined, 'Description')
-			: fields.description;
+		body.description =
+			typeof fields.description === 'string'
+				? validateFieldLength(fields.description, undefined, 'Description')
+				: fields.description;
 	}
 
 	// Only include dueDate and priority for update operation
@@ -510,7 +524,8 @@ export class ZohoDesk implements INodeType {
 					},
 				},
 				default: '',
-				description: 'The department to which the ticket belongs. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+				description:
+					'The department to which the ticket belongs. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
 				displayName: 'Subject',
@@ -540,47 +555,50 @@ export class ZohoDesk implements INodeType {
 					},
 				},
 				default: {},
-				description: 'Details of the contact who raised the ticket. If email exists, contactId is used; otherwise, a new contact is created. Either lastName or email must be present.',
+				description:
+					'Details of the contact who raised the ticket. If email exists, contactId is used; otherwise, a new contact is created. Either lastName or email must be present.',
 				options: [
 					{
 						name: 'contactValues',
 						displayName: 'Contact Details',
 						values: [
 							{
-							displayName: 'Email',
-							name: 'email',
-							type: 'string',
-							placeholder: 'name@email.com',
-							default: '',
-							description: 'Email address of the contact (required if lastName is not provided)',
+								displayName: 'Email',
+								name: 'email',
+								type: 'string',
+								placeholder: 'name@email.com',
+								default: '',
+								description:
+									'Email address of the contact (required if lastName is not provided)',
 							},
 							{
-							displayName: 'First Name',
-							name: 'firstName',
-							type: 'string',
-							default: '',
-							description: 'First name of the contact',
+								displayName: 'First Name',
+								name: 'firstName',
+								type: 'string',
+								default: '',
+								description: 'First name of the contact',
 							},
 							{
-							displayName: 'Last Name',
-							name: 'lastName',
-							type: 'string',
-							default: '',
-							description: 'Last name of the contact (required if email is not provided)',
+								displayName: 'Last Name',
+								name: 'lastName',
+								type: 'string',
+								default: '',
+								description:
+									'Last name of the contact (required if email is not provided)',
 							},
 							{
-							displayName: 'Mobile',
-							name: 'mobile',
-							type: 'string',
-							default: '',
-							description: 'Mobile number of the contact',
+								displayName: 'Mobile',
+								name: 'mobile',
+								type: 'string',
+								default: '',
+								description: 'Mobile number of the contact',
 							},
 							{
-							displayName: 'Phone',
-							name: 'phone',
-							type: 'string',
-							default: '',
-							description: 'Phone number of the contact',
+								displayName: 'Phone',
+								name: 'phone',
+								type: 'string',
+								default: '',
+								description: 'Phone number of the contact',
 							},
 						],
 					},
@@ -697,7 +715,8 @@ export class ZohoDesk implements INodeType {
 							loadOptionsDependsOn: ['departmentId'],
 						},
 						default: '',
-						description: 'The team assigned to the ticket. Note: Teams will only load if Department is selected first. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+						description:
+							'The team assigned to the ticket. Note: Teams will only load if Department is selected first. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 					},
 					{
 						displayName: 'Custom Fields',
@@ -875,7 +894,8 @@ export class ZohoDesk implements INodeType {
 						name: 'dueDate',
 						type: 'dateTime',
 						default: '',
-						description: 'The due date for resolving the ticket (leave empty to keep current due date)',
+						description:
+							'The due date for resolving the ticket (leave empty to keep current due date)',
 					},
 					{
 						displayName: 'Priority',
@@ -983,7 +1003,8 @@ export class ZohoDesk implements INodeType {
 							loadOptionsMethod: 'getDepartments',
 						},
 						default: '',
-						description: 'The department to which the ticket belongs. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+						description:
+							'The department to which the ticket belongs. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 					},
 					{
 						displayName: 'Email',
@@ -1062,7 +1083,8 @@ export class ZohoDesk implements INodeType {
 							loadOptionsDependsOn: ['departmentId'],
 						},
 						default: '',
-						description: 'The team assigned to the ticket. Note: Teams will only load if Department is selected first. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+						description:
+							'The team assigned to the ticket. Note: Teams will only load if Department is selected first. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 					},
 				],
 			},
@@ -1084,7 +1106,7 @@ export class ZohoDesk implements INodeType {
 					const options = {
 						method: 'GET',
 						headers: {
-							'orgId': orgId,
+							orgId: orgId,
 						},
 						uri: `${baseUrl}/departments`,
 						json: true,
@@ -1097,8 +1119,12 @@ export class ZohoDesk implements INodeType {
 					);
 
 					// Runtime validation of API response structure
-					if (!response || typeof response !== 'object' ||
-						!('data' in response) || !Array.isArray(response.data)) {
+					if (
+						!response ||
+						typeof response !== 'object' ||
+						!('data' in response) ||
+						!Array.isArray(response.data)
+					) {
 						throw new Error('Invalid API response structure from Zoho Desk');
 					}
 
@@ -1111,10 +1137,12 @@ export class ZohoDesk implements INodeType {
 				} catch (error) {
 					// Return error option in dropdown so users can see what went wrong
 					const errorMessage = error instanceof Error ? error.message : String(error);
-					return [{
-						name: `⚠️ Error loading departments: ${errorMessage}`,
-						value: '',
-					}];
+					return [
+						{
+							name: `⚠️ Error loading departments: ${errorMessage}`,
+							value: '',
+						},
+					];
 				}
 			},
 
@@ -1137,7 +1165,7 @@ export class ZohoDesk implements INodeType {
 					const options = {
 						method: 'GET',
 						headers: {
-							'orgId': orgId,
+							orgId: orgId,
 						},
 						uri: `${baseUrl}/departments/${encodeURIComponent(departmentId)}/teams`,
 						json: true,
@@ -1150,8 +1178,12 @@ export class ZohoDesk implements INodeType {
 					);
 
 					// Runtime validation of API response structure
-					if (!response || typeof response !== 'object' ||
-						!('data' in response) || !Array.isArray(response.data)) {
+					if (
+						!response ||
+						typeof response !== 'object' ||
+						!('data' in response) ||
+						!Array.isArray(response.data)
+					) {
 						throw new Error('Invalid API response structure from Zoho Desk');
 					}
 
@@ -1164,10 +1196,12 @@ export class ZohoDesk implements INodeType {
 				} catch (error) {
 					// Return error option in dropdown so users can see what went wrong
 					const errorMessage = error instanceof Error ? error.message : String(error);
-					return [{
-						name: `⚠️ Error loading teams: ${errorMessage}`,
-						value: '',
-					}];
+					return [
+						{
+							name: `⚠️ Error loading teams: ${errorMessage}`,
+							value: '',
+						},
+					];
 				}
 			},
 		},
@@ -1195,7 +1229,10 @@ export class ZohoDesk implements INodeType {
 						const priority = this.getNodeParameter('priority', i) as string;
 						const classification = this.getNodeParameter('classification', i) as string;
 						const dueDate = this.getNodeParameter('dueDate', i) as string;
-						const additionalFields = this.getNodeParameter('additionalFields', i) as IDataObject;
+						const additionalFields = this.getNodeParameter(
+							'additionalFields',
+							i,
+						) as IDataObject;
 
 						// Validate length for subject (XSS protection handled by Zoho Desk API)
 						// No length limit - let Zoho Desk API validate
@@ -1226,14 +1263,15 @@ export class ZohoDesk implements INodeType {
 							if (!isPlainObject(contactValues)) {
 								throw new Error(
 									'Contact validation failed: Invalid contact data format. ' +
-									'See: ' + ZOHO_DESK_CREATE_TICKET_DOCS,
+										'See: ' +
+										ZOHO_DESK_CREATE_TICKET_DOCS,
 								);
 							}
 
 							// Check if any non-empty values exist before processing
 							// This prevents unnecessary validation errors when user provides empty contact fields
 							const hasNonEmptyValue = Object.values(contactValues).some(
-								value => value && String(value).trim() !== ''
+								(value) => value && String(value).trim() !== '',
 							);
 
 							if (hasNonEmptyValue) {
@@ -1244,18 +1282,49 @@ export class ZohoDesk implements INodeType {
 
 								// Use helper function to add contact fields with validation and CRLF sanitization
 								// Only email has a documented length limit (RFC 5321), others validated by API
-								addContactField(contact, contactValues, 'email', 'email', FIELD_LENGTH_LIMITS.email);
-								addContactField(contact, contactValues, 'lastName', 'lastName', undefined);
-								addContactField(contact, contactValues, 'firstName', 'firstName', undefined);
-								addContactField(contact, contactValues, 'phone', 'phone', undefined);
-								addContactField(contact, contactValues, 'mobile', 'mobile', undefined);
+								addContactField(
+									contact,
+									contactValues,
+									'email',
+									'email',
+									FIELD_LENGTH_LIMITS.email,
+								);
+								addContactField(
+									contact,
+									contactValues,
+									'lastName',
+									'lastName',
+									undefined,
+								);
+								addContactField(
+									contact,
+									contactValues,
+									'firstName',
+									'firstName',
+									undefined,
+								);
+								addContactField(
+									contact,
+									contactValues,
+									'phone',
+									'phone',
+									undefined,
+								);
+								addContactField(
+									contact,
+									contactValues,
+									'mobile',
+									'mobile',
+									undefined,
+								);
 
 								// Validation: if contact has values, ensure at least email or lastName is present
 								// This catches edge cases where only firstName/phone/mobile are provided
 								if (!contact.email && !contact.lastName) {
 									throw new Error(
 										'Contact validation failed: Either email or lastName must be provided. ' +
-										'See: ' + ZOHO_DESK_CREATE_TICKET_DOCS,
+											'See: ' +
+											ZOHO_DESK_CREATE_TICKET_DOCS,
 									);
 								}
 
@@ -1274,8 +1343,9 @@ export class ZohoDesk implements INodeType {
 						// Handle tags with filtering of empty values and CRLF sanitization
 						// No length limit - let Zoho Desk API validate
 						if (additionalFields.tags && typeof additionalFields.tags === 'string') {
-							const tags = parseCommaSeparatedList(additionalFields.tags)
-								.map(tag => validateFieldLength(tag, undefined, 'Tag'));
+							const tags = parseCommaSeparatedList(additionalFields.tags).map((tag) =>
+								validateFieldLength(tag, undefined, 'Tag'),
+							);
 							if (tags.length > 0) {
 								body.tags = tags;
 							}
@@ -1284,14 +1354,18 @@ export class ZohoDesk implements INodeType {
 						const options = {
 							method: 'POST',
 							headers: {
-								'orgId': orgId,
+								orgId: orgId,
 							},
 							body,
 							uri: `${baseUrl}/tickets`,
 							json: true,
 						};
 
-						const response = await this.helpers.requestOAuth2.call(this, 'zohoDeskOAuth2Api', options);
+						const response = await this.helpers.requestOAuth2.call(
+							this,
+							'zohoDeskOAuth2Api',
+							options,
+						);
 
 						returnData.push({
 							json: response,
@@ -1302,13 +1376,17 @@ export class ZohoDesk implements INodeType {
 					if (operation === 'update') {
 						// Update ticket
 						const ticketId = this.getNodeParameter('ticketId', i) as string;
-						const updateFields = this.getNodeParameter('updateFields', i) as IDataObject;
+						const updateFields = this.getNodeParameter(
+							'updateFields',
+							i,
+						) as IDataObject;
 
 						// Validate ticket ID format (should be numeric)
 						if (!isValidTicketId(ticketId)) {
 							throw new Error(
 								`Invalid ticket ID format: "${ticketId}". Ticket ID must be a numeric value. ` +
-								'See: ' + ZOHO_DESK_UPDATE_TICKET_DOCS,
+									'See: ' +
+									ZOHO_DESK_UPDATE_TICKET_DOCS,
 							);
 						}
 
@@ -1322,9 +1400,13 @@ export class ZohoDesk implements INodeType {
 
 						// Handle tags with filtering of empty values and CRLF sanitization
 						// No length limit - let Zoho Desk API validate
-						if (updateFields.tags !== undefined && typeof updateFields.tags === 'string') {
-							const tags = parseCommaSeparatedList(updateFields.tags)
-								.map(tag => validateFieldLength(tag, undefined, 'Tag'));
+						if (
+							updateFields.tags !== undefined &&
+							typeof updateFields.tags === 'string'
+						) {
+							const tags = parseCommaSeparatedList(updateFields.tags).map((tag) =>
+								validateFieldLength(tag, undefined, 'Tag'),
+							);
 							if (tags.length > 0) {
 								body.tags = tags;
 							}
@@ -1333,14 +1415,18 @@ export class ZohoDesk implements INodeType {
 						const options = {
 							method: 'PATCH',
 							headers: {
-								'orgId': orgId,
+								orgId: orgId,
 							},
 							body,
 							uri: `${baseUrl}/tickets/${encodeURIComponent(ticketId)}`,
 							json: true,
 						};
 
-						const response = await this.helpers.requestOAuth2.call(this, 'zohoDeskOAuth2Api', options);
+						const response = await this.helpers.requestOAuth2.call(
+							this,
+							'zohoDeskOAuth2Api',
+							options,
+						);
 
 						returnData.push({
 							json: response,
@@ -1354,7 +1440,7 @@ export class ZohoDesk implements INodeType {
 				if (errorObj.statusCode === 429 || errorObj.code === 429) {
 					const rateLimitError = new Error(
 						'Zoho Desk API rate limit exceeded (10 requests/second per organization). ' +
-						'Please wait a moment and try again, or reduce the number of items being processed.',
+							'Please wait a moment and try again, or reduce the number of items being processed.',
 					);
 					if (this.continueOnFail()) {
 						returnData.push({
