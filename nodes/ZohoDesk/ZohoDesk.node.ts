@@ -1192,14 +1192,27 @@ export class ZohoDesk implements INodeType {
             options,
           );
 
-          // Runtime validation of API response structure
-          if (
-            !response ||
-            typeof response !== 'object' ||
-            !('data' in response) ||
-            !Array.isArray(response.data)
-          ) {
-            throw new Error('Invalid API response structure from Zoho Desk');
+          // Runtime validation of API response structure with detailed error reporting
+          if (!response || typeof response !== 'object') {
+            throw new Error(
+              `Invalid API response structure from Zoho Desk. Expected an object, received: ${typeof response}. ` +
+                `Response: ${JSON.stringify(response)}`,
+            );
+          }
+
+          if (!('data' in response)) {
+            throw new Error(
+              `Invalid API response structure from Zoho Desk. Missing 'data' property. ` +
+                `Response keys: ${Object.keys(response).join(', ')}. ` +
+                `Response: ${JSON.stringify(response)}`,
+            );
+          }
+
+          if (!Array.isArray(response.data)) {
+            throw new Error(
+              `Invalid API response structure from Zoho Desk. Expected 'data' to be an array, received: ${typeof response.data}. ` +
+                `Response: ${JSON.stringify(response)}`,
+            );
           }
 
           const typedResponse = response as ZohoDeskListResponse<ZohoDeskTeam>;
