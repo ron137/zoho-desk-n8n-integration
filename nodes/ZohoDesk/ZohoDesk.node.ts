@@ -38,9 +38,9 @@ interface ZohoDeskListResponse<T> {
 
 /**
  * Optional fields for ticket create operation
- * Note: Some fields like 'description', 'secondaryContacts', 'cf', and 'tags'
+ * Note: Some fields like 'secondaryContacts', 'cf', and 'tags'
  * are handled separately with custom parsing logic (see addCommonTicketFields function)
- * Note: 'priority', 'classification', and 'dueDate' are primary fields for create operation
+ * Note: 'priority', 'classification', 'dueDate', and 'description' are primary fields for create operation
  */
 const TICKET_CREATE_OPTIONAL_FIELDS = [
 	'accountId',
@@ -59,8 +59,9 @@ const TICKET_CREATE_OPTIONAL_FIELDS = [
 
 /**
  * Optional fields for ticket update operation
- * Note: Some fields like 'description', 'dueDate', 'priority', 'secondaryContacts', 'cf', and 'tags'
+ * Note: Some fields like 'dueDate', 'priority', 'secondaryContacts', 'cf', and 'tags'
  * are handled separately with custom parsing logic (see addCommonTicketFields function)
+ * Note: 'description' is now a primary field for update operation
  * Note: 'channel' is not updatable - it represents how the ticket was originally created
  * Note: 'classification' is now handled as an options field with "No Change" option
  */
@@ -417,14 +418,7 @@ function addCommonTicketFields(
 	fields: IDataObject,
 	includePriorityAndDueDate = true,
 ): void {
-	if (fields.description !== undefined) {
-		// Validate length for description (XSS protection handled by Zoho Desk API)
-		// No length limit - let Zoho Desk API validate
-		body.description =
-			typeof fields.description === 'string'
-				? validateFieldLength(fields.description, undefined, 'Description')
-				: fields.description;
-	}
+	// Description is now a primary field, so it's not handled here anymore
 
 	// Only include dueDate and priority for update operation
 	// For create operation, these are primary fields set separately
@@ -676,6 +670,22 @@ export class ZohoDesk implements INodeType {
 				description: 'The due date for resolving the ticket',
 			},
 			{
+				displayName: 'Description',
+				name: 'description',
+				type: 'string',
+				typeOptions: {
+					rows: 5,
+				},
+				displayOptions: {
+					show: {
+						resource: ['ticket'],
+						operation: ['create'],
+					},
+				},
+				default: '',
+				description: 'Description of the ticket',
+			},
+			{
 				displayName: 'Additional Fields',
 				name: 'additionalFields',
 				type: 'collection',
@@ -688,16 +698,6 @@ export class ZohoDesk implements INodeType {
 					},
 				},
 				options: [
-					{
-						displayName: 'Description',
-						name: 'description',
-						type: 'string',
-						typeOptions: {
-							rows: 5,
-						},
-						default: '',
-						description: 'Description of the ticket',
-					},
 					{
 						displayName: 'Secondary Contacts',
 						name: 'secondaryContacts',
@@ -867,6 +867,22 @@ export class ZohoDesk implements INodeType {
 				description: 'The ID of the ticket to update',
 			},
 			{
+				displayName: 'Description',
+				name: 'description',
+				type: 'string',
+				typeOptions: {
+					rows: 5,
+				},
+				displayOptions: {
+					show: {
+						resource: ['ticket'],
+						operation: ['update'],
+					},
+				},
+				default: '',
+				description: 'Description of the ticket',
+			},
+			{
 				displayName: 'Update Fields',
 				name: 'updateFields',
 				type: 'collection',
@@ -879,16 +895,6 @@ export class ZohoDesk implements INodeType {
 					},
 				},
 				options: [
-					{
-						displayName: 'Description',
-						name: 'description',
-						type: 'string',
-						typeOptions: {
-							rows: 5,
-						},
-						default: '',
-						description: 'Description of the ticket',
-					},
 					{
 						displayName: 'Due Date',
 						name: 'dueDate',
@@ -1229,6 +1235,7 @@ export class ZohoDesk implements INodeType {
 						const priority = this.getNodeParameter('priority', i) as string;
 						const classification = this.getNodeParameter('classification', i) as string;
 						const dueDate = this.getNodeParameter('dueDate', i) as string;
+						const description = this.getNodeParameter('description', i) as string;
 						const additionalFields = this.getNodeParameter(
 							'additionalFields',
 							i,
@@ -1248,6 +1255,15 @@ export class ZohoDesk implements INodeType {
 						// Add dueDate if provided
 						if (dueDate) {
 							body.dueDate = dueDate;
+						}
+
+						// Add description if provided
+						if (description) {
+							body.description = validateFieldLength(
+								description,
+								undefined,
+								'Description',
+							);
 						}
 
 						// Handle and validate contact object (OPTIONAL)
@@ -1376,6 +1392,7 @@ export class ZohoDesk implements INodeType {
 					if (operation === 'update') {
 						// Update ticket
 						const ticketId = this.getNodeParameter('ticketId', i) as string;
+						const description = this.getNodeParameter('description', i) as string;
 						const updateFields = this.getNodeParameter(
 							'updateFields',
 							i,
@@ -1396,6 +1413,15 @@ export class ZohoDesk implements INodeType {
 						addCommonTicketFields(body, updateFields);
 
 						// Add other update fields
+
+						// Add description if provided
+						if (description) {
+							body.description = validateFieldLength(
+								description,
+								undefined,
+								'Description',
+							);
+						}
 						addOptionalFields(body, updateFields, TICKET_UPDATE_OPTIONAL_FIELDS);
 
 						// Handle tags with filtering of empty values and CRLF sanitization
