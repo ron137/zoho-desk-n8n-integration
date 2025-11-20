@@ -44,8 +44,7 @@
   },
   "lint-staged": {
     "*.ts": [
-      "eslint --fix",
-      "prettier --write"
+      "npm run format"
     ]
   },
   "files": [
