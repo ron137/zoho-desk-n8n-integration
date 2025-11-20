@@ -1274,7 +1274,7 @@ export class ZohoDesk implements INodeType {
             }
 
             // Add dueDate if provided - convert ISO 8601 string to milliseconds timestamp
-            if (dueDate) {
+            if (dueDate && dueDate.trim() !== '') {
               // n8n dateTime field returns ISO 8601 string, Zoho Desk API expects milliseconds timestamp
               const timestamp = new Date(dueDate).getTime();
               if (isNaN(timestamp)) {
