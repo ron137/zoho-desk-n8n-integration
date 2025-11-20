@@ -1,6 +1,6 @@
 {
   "name": "@enthu/n8n-nodes-zoho-desk",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "n8n community node for Zoho Desk API integration",
   "keywords": [
     "n8n-community-node-package",
