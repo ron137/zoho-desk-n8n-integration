@@ -40,7 +40,8 @@ interface ZohoDeskListResponse<T> {
  * Optional fields for ticket create operation
  * Note: Some fields like 'secondaryContacts', 'cf', and 'tags'
  * are handled separately with custom parsing logic (see addCommonTicketFields function)
- * Note: 'priority', 'classification', 'dueDate', and 'description' are primary fields for create operation
+ * Note: 'priority', 'classification', 'dueDate', 'description', and 'tags' are primary fields for create operation
+ * Note: 'teamId' is not included in create operation (only in update)
  */
 const TICKET_CREATE_OPTIONAL_FIELDS = [
   'accountId',
@@ -54,7 +55,6 @@ const TICKET_CREATE_OPTIONAL_FIELDS = [
   'resolution',
   'status',
   'subCategory',
-  'teamId',
 ] as const;
 
 /**
@@ -684,6 +684,20 @@ export class ZohoDesk implements INodeType {
         description: 'Description of the ticket',
       },
       {
+        displayName: 'Tags',
+        name: 'tags',
+        type: 'string',
+        displayOptions: {
+          show: {
+            resource: ['ticket'],
+            operation: ['create'],
+          },
+        },
+        default: '',
+        description: 'Comma-separated list of tags associated with the ticket',
+        placeholder: 'urgent, customer-service, billing',
+      },
+      {
         displayName: 'Additional Fields',
         name: 'additionalFields',
         type: 'collection',
@@ -703,18 +717,6 @@ export class ZohoDesk implements INodeType {
             default: '',
             description: 'Comma-separated list of contact IDs for secondary contacts',
             placeholder: '1892000000042038, 1892000000042042',
-          },
-          {
-            displayName: 'Team Name or ID',
-            name: 'teamId',
-            type: 'options',
-            typeOptions: {
-              loadOptionsMethod: 'getTeams',
-              loadOptionsDependsOn: ['departmentId'],
-            },
-            default: '',
-            description:
-              'The team assigned to the ticket. Note: Teams will only load if Department is selected first. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
           },
           {
             displayName: 'Custom Fields',
@@ -838,14 +840,6 @@ export class ZohoDesk implements INodeType {
             type: 'string',
             default: '',
             description: 'Sub-category to which the ticket belongs',
-          },
-          {
-            displayName: 'Tags',
-            name: 'tags',
-            type: 'string',
-            default: '',
-            description: 'Comma-separated list of tags associated with the ticket',
-            placeholder: 'urgent, customer-service, billing',
           },
         ],
       },
@@ -1234,6 +1228,7 @@ export class ZohoDesk implements INodeType {
             const classification = this.getNodeParameter('classification', i) as string;
             const dueDate = this.getNodeParameter('dueDate', i) as string;
             const description = this.getNodeParameter('description', i) as string;
+            const tags = this.getNodeParameter('tags', i) as string;
             const additionalFields = this.getNodeParameter('additionalFields', i) as IDataObject;
 
             // Validate length for subject (XSS protection handled by Zoho Desk API)
@@ -1324,13 +1319,14 @@ export class ZohoDesk implements INodeType {
             addOptionalFields(body, additionalFields, TICKET_CREATE_OPTIONAL_FIELDS);
 
             // Handle tags with filtering of empty values and CRLF sanitization
+            // Tags is now a primary field for create operation
             // No length limit - let Zoho Desk API validate
-            if (additionalFields.tags && typeof additionalFields.tags === 'string') {
-              const tags = parseCommaSeparatedList(additionalFields.tags).map((tag) =>
+            if (tags && typeof tags === 'string') {
+              const parsedTags = parseCommaSeparatedList(tags).map((tag) =>
                 validateFieldLength(tag, undefined, 'Tag'),
               );
-              if (tags.length > 0) {
-                body.tags = tags;
+              if (parsedTags.length > 0) {
+                body.tags = parsedTags;
               }
             }
 
