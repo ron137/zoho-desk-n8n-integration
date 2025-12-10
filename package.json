@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-zoho-desk-extended",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "n8n community node for Zoho Desk API integration - Tickets, Contacts, and Accounts management",
   "keywords": [
     "n8n-community-node-package",
@@ -61,7 +61,8 @@
       "dist/credentials/ZohoDeskOAuth2Api.credentials.js"
     ],
     "nodes": [
-      "dist/nodes/ZohoDesk/ZohoDesk.node.js"
+      "dist/nodes/ZohoDesk/ZohoDesk.node.js",
+      "dist/nodes/ZohoDesk/ZohoDeskTrigger.node.js"
     ]
   },
   "devDependencies": {
