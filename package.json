@@ -1,27 +1,28 @@
 {
-  "name": "@enthu/n8n-nodes-zoho-desk",
-  "version": "0.3.11",
-  "description": "n8n community node for Zoho Desk API integration",
+  "name": "zoho-desk-n8n-integration",
+  "version": "1.0.0",
+  "description": "n8n community node for Zoho Desk API integration - Tickets, Contacts, and Accounts management",
   "keywords": [
     "n8n-community-node-package",
     "n8n",
     "zoho",
     "zoho-desk",
-    "enthu"
+    "helpdesk",
+    "tickets",
+    "crm"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/enthuziastic/n8n-nodes-zoho-desk",
+  "homepage": "https://github.com/ron137/zoho-desk-n8n-integration",
   "author": {
-    "name": "Enthuziastic",
-    "email": "tispratik@gmail.com"
+    "name": "Ron",
+    "email": "rons137@gmail.com"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/enthuziastic/n8n-nodes-zoho-desk.git"
+    "url": "git+https://github.com/ron137/zoho-desk-n8n-integration.git"
   },
   "publishConfig": {
-    "access": "public",
-    "@enthu:registry": "https://registry.npmjs.org"
+    "access": "public"
   },
   "engines": {
     "node": ">=18.10"
@@ -40,7 +41,10 @@
     "version:major": "npm version major",
     "publish:patch": "npm run build && npm run version:patch && npm publish",
     "publish:minor": "npm run build && npm run version:minor && npm publish",
-    "publish:major": "npm run build && npm run version:major && npm publish"
+    "publish:major": "npm run build && npm run version:major && npm publish",
+    "test": "jest",
+    "test:integration": "jest tests/integration",
+    "test:coverage": "jest --coverage"
   },
   "lint-staged": {
     "*.ts": [
@@ -61,15 +65,19 @@
     ]
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.10.5",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
+    "dotenv": "^17.2.3",
     "eslint": "^8.56.0",
     "eslint-plugin-n8n-nodes-base": "^1.16.1",
     "husky": "^9.1.7",
+    "jest": "^30.2.0",
     "lint-staged": "^16.2.7",
     "n8n-workflow": "*",
     "prettier": "^3.1.1",
+    "ts-jest": "^29.4.6",
     "typescript": "^5.3.3"
   }
 }

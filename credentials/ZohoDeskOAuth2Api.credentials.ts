@@ -27,20 +27,20 @@ export class ZohoDeskOAuth2Api implements ICredentialType {
           value: 'com',
         },
         {
-          name: 'zoho.eu (EU)',
-          value: 'eu',
-        },
-        {
-          name: 'zoho.in (India)',
-          value: 'in',
+          name: 'zoho.com.au (Australia)',
+          value: 'com.au',
         },
         {
           name: 'zoho.com.cn (China)',
           value: 'com.cn',
         },
         {
-          name: 'zoho.com.au (Australia)',
-          value: 'com.au',
+          name: 'zoho.eu (EU)',
+          value: 'eu',
+        },
+        {
+          name: 'zoho.in (India)',
+          value: 'in',
         },
         {
           name: 'zoho.jp (Japan)',
@@ -84,7 +84,7 @@ export class ZohoDeskOAuth2Api implements ICredentialType {
       name: 'scope',
       type: 'hidden',
       default:
-        'Desk.tickets.ALL Desk.contacts.READ Desk.contacts.WRITE Desk.contacts.CREATE Desk.basic.READ Desk.basic.CREATE Desk.settings.READ',
+        'Desk.tickets.ALL Desk.contacts.ALL Desk.accounts.ALL Desk.basic.READ Desk.settings.READ',
     },
     {
       displayName: 'Auth URI Query Parameters',

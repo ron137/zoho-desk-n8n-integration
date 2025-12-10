@@ -1,4 +1,5 @@
 import {
+  ApplicationError,
   IExecuteFunctions,
   INodeExecutionData,
   INodeType,
@@ -6,6 +7,7 @@ import {
   IDataObject,
   ILoadOptionsFunctions,
   INodePropertyOptions,
+  NodeOperationError,
 } from 'n8n-workflow';
 
 /**
@@ -142,6 +144,79 @@ const ZOHO_DESK_CREATE_TICKET_DOCS =
   'https://desk.zoho.com/support/APIDocument#Tickets#Tickets_CreateTicket';
 const ZOHO_DESK_UPDATE_TICKET_DOCS =
   'https://desk.zoho.com/support/APIDocument#Tickets#Tickets_UpdateTicket';
+const ZOHO_DESK_GET_TICKET_DOCS =
+  'https://desk.zoho.com/support/APIDocument#Tickets#Tickets_GetTicket';
+const ZOHO_DESK_LIST_TICKETS_DOCS =
+  'https://desk.zoho.com/support/APIDocument#Tickets#Tickets_ListAllTickets';
+const ZOHO_DESK_COMMENTS_DOCS = 'https://desk.zoho.com/support/APIDocument#TicketComments';
+const ZOHO_DESK_THREADS_DOCS = 'https://desk.zoho.com/support/APIDocument#TicketThreads';
+const ZOHO_DESK_CONTACTS_DOCS = 'https://desk.zoho.com/support/APIDocument#Contacts';
+const ZOHO_DESK_ACCOUNTS_DOCS = 'https://desk.zoho.com/support/APIDocument#Accounts';
+
+/**
+ * Optional fields for contact create operation
+ */
+const CONTACT_CREATE_OPTIONAL_FIELDS = [
+  'firstName',
+  'phone',
+  'mobile',
+  'accountId',
+  'twitter',
+  'facebook',
+  'type',
+  'description',
+] as const;
+
+/**
+ * Optional fields for contact update operation
+ */
+const CONTACT_UPDATE_OPTIONAL_FIELDS = [
+  'firstName',
+  'lastName',
+  'email',
+  'phone',
+  'mobile',
+  'accountId',
+  'twitter',
+  'facebook',
+  'type',
+  'description',
+] as const;
+
+/**
+ * Optional fields for account create operation
+ */
+const ACCOUNT_CREATE_OPTIONAL_FIELDS = [
+  'website',
+  'phone',
+  'fax',
+  'industry',
+  'description',
+  'code',
+  'city',
+  'country',
+  'state',
+  'street',
+  'zip',
+] as const;
+
+/**
+ * Optional fields for account update operation
+ */
+const ACCOUNT_UPDATE_OPTIONAL_FIELDS = [
+  'accountName',
+  'website',
+  'phone',
+  'fax',
+  'industry',
+  'description',
+  'code',
+  'city',
+  'country',
+  'state',
+  'street',
+  'zip',
+] as const;
 
 /**
  * HTTP error interface for proper error type handling
@@ -192,7 +267,7 @@ function parseCustomFields(cf: unknown): IDataObject {
 
     // Validate that parsed result is a plain object (not array or primitive)
     if (!isPlainObject(parsed)) {
-      throw new Error(
+      throw new ApplicationError(
         'Custom fields must be a JSON object, not an array or primitive value. ' +
           'See: ' +
           ZOHO_DESK_CREATE_TICKET_DOCS,
@@ -225,7 +300,7 @@ function parseCustomFields(cf: unknown): IDataObject {
 
     // Wrap JSON parsing errors with helpful context
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(
+    throw new ApplicationError(
       `Custom fields must be valid JSON. Parse error: ${errorMessage}. ` +
         `Please ensure your JSON is properly formatted, e.g., {"cf_field": "value"}. ` +
         'See: ' +
@@ -310,7 +385,7 @@ function isValidZohoDeskId(id: string, fieldName: string): boolean {
   // Less strict than ticket IDs as different resources may have different lengths
   // Use pre-compiled pattern for performance
   if (!ZOHO_DESK_ID_PATTERN.test(trimmed)) {
-    throw new Error(
+    throw new ApplicationError(
       `Invalid ${fieldName} format: "${trimmed}". ` +
         `${fieldName} must be a numeric value with at least 10 digits.`,
     );
@@ -343,7 +418,7 @@ function isValidZohoDeskId(id: string, fieldName: string): boolean {
 function validateFieldLength(value: string, maxLength?: number, fieldName?: string): string {
   // Enforce length limit if specified - THROW ERROR instead of silent truncation
   if (maxLength && value.length > maxLength) {
-    throw new Error(
+    throw new ApplicationError(
       `${fieldName || 'Field'} exceeds maximum length of ${maxLength} characters (${value.length} provided). ` +
         'Please shorten your input and try again.',
     );
@@ -364,7 +439,7 @@ function validateFieldLength(value: string, maxLength?: number, fieldName?: stri
 function convertDateToTimestamp(dateString: string, fieldName: string, docsUrl: string): string {
   // Validate that date string is not empty or whitespace-only
   if (!dateString || dateString.trim() === '') {
-    throw new Error(
+    throw new ApplicationError(
       `${fieldName} cannot be empty. Expected ISO 8601 format (e.g., "2025-11-20T10:30:00.000Z"). ` +
         'See: ' +
         docsUrl,
@@ -374,7 +449,7 @@ function convertDateToTimestamp(dateString: string, fieldName: string, docsUrl: 
   // Validate date string format
   const date = new Date(dateString);
   if (isNaN(date.getTime())) {
-    throw new Error(
+    throw new ApplicationError(
       `Invalid ${fieldName} format: "${dateString}". Expected ISO 8601 format (e.g., "2025-11-20T10:30:00.000Z"). ` +
         'See: ' +
         docsUrl,
@@ -419,7 +494,7 @@ function addContactField(
 
   const fieldType = typeof contactValues[fieldName];
   if (fieldType !== 'string' && fieldType !== 'number') {
-    throw new Error(
+    throw new ApplicationError(
       `Contact validation failed: ${fieldLabel} must be a string or number, not a complex object. ` +
         'See: ' +
         ZOHO_DESK_CREATE_TICKET_DOCS,
@@ -435,7 +510,7 @@ function addContactField(
 
     // Additional validation for email field
     if (fieldName === 'email' && !isValidEmail(cleaned)) {
-      throw new Error(
+      throw new ApplicationError(
         `Contact validation failed: Invalid email format "${cleaned}". ` +
           'See: ' +
           ZOHO_DESK_CREATE_TICKET_DOCS,
@@ -444,6 +519,58 @@ function addContactField(
 
     contact[fieldName] = cleaned;
   }
+}
+
+/**
+ * Fetch all pages from a paginated Zoho Desk API endpoint
+ * @param context - The IExecuteFunctions context
+ * @param baseUrl - API base URL
+ * @param endpoint - API endpoint (e.g., '/tickets')
+ * @param orgId - Organization ID
+ * @param limit - Items per page (max varies by endpoint, typically 50-200)
+ * @param dataKey - Response key containing data array (default: 'data')
+ * @param queryParams - Additional query parameters to include
+ * @returns Array of all items from all pages
+ */
+async function getAllPaginatedItems(
+  context: IExecuteFunctions,
+  baseUrl: string,
+  endpoint: string,
+  orgId: string,
+  limit: number,
+  dataKey: string = 'data',
+  queryParams?: IDataObject,
+): Promise<IDataObject[]> {
+  const allItems: IDataObject[] = [];
+  let from = 1;
+  let hasMore = true;
+
+  while (hasMore) {
+    const options = {
+      method: 'GET',
+      headers: { orgId },
+      uri: `${baseUrl}${endpoint}`,
+      qs: { from, limit, ...queryParams },
+      json: true,
+    };
+
+    const response = await context.helpers.requestOAuth2.call(
+      context,
+      'zohoDeskOAuth2Api',
+      options,
+    );
+
+    const items = (response[dataKey] as IDataObject[]) || [];
+    allItems.push(...items);
+
+    if (items.length < limit) {
+      hasMore = false;
+    } else {
+      from += limit;
+    }
+  }
+
+  return allItems;
 }
 
 /**
@@ -503,7 +630,7 @@ export class ZohoDesk implements INodeType {
     group: ['transform'],
     version: 1,
     subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
-    description: 'Create and update tickets in Zoho Desk',
+    description: 'Manage tickets, contacts, and accounts in Zoho Desk',
     defaults: {
       name: 'Zoho Desk',
     },
@@ -523,12 +650,21 @@ export class ZohoDesk implements INodeType {
         noDataExpression: true,
         options: [
           {
+            name: 'Account',
+            value: 'account',
+          },
+          {
+            name: 'Contact',
+            value: 'contact',
+          },
+          {
             name: 'Ticket',
             value: 'ticket',
           },
         ],
         default: 'ticket',
       },
+      // ==================== TICKET OPERATIONS ====================
       {
         displayName: 'Operation',
         name: 'operation',
@@ -541,16 +677,136 @@ export class ZohoDesk implements INodeType {
         },
         options: [
           {
+            name: 'Add Comment',
+            value: 'addComment',
+            description: 'Add a comment to a ticket',
+            action: 'Add comment to ticket',
+          },
+          {
             name: 'Create',
             value: 'create',
             description: 'Create a new ticket',
             action: 'Create a ticket',
           },
           {
+            name: 'Delete',
+            value: 'delete',
+            description: 'Delete a ticket',
+            action: 'Delete a ticket',
+          },
+          {
+            name: 'Get',
+            value: 'get',
+            description: 'Get a ticket by ID',
+            action: 'Get a ticket',
+          },
+          {
+            name: 'List',
+            value: 'list',
+            description: 'List all tickets',
+            action: 'List tickets',
+          },
+          {
+            name: 'List Threads',
+            value: 'listThreads',
+            description: 'List ticket conversations/threads',
+            action: 'List ticket threads',
+          },
+          {
             name: 'Update',
             value: 'update',
             description: 'Update an existing ticket',
             action: 'Update a ticket',
+          },
+        ],
+        default: 'create',
+      },
+      // ==================== CONTACT OPERATIONS ====================
+      {
+        displayName: 'Operation',
+        name: 'operation',
+        type: 'options',
+        noDataExpression: true,
+        displayOptions: {
+          show: {
+            resource: ['contact'],
+          },
+        },
+        options: [
+          {
+            name: 'Create',
+            value: 'create',
+            description: 'Create a new contact',
+            action: 'Create a contact',
+          },
+          {
+            name: 'Delete',
+            value: 'delete',
+            description: 'Delete a contact',
+            action: 'Delete a contact',
+          },
+          {
+            name: 'Get',
+            value: 'get',
+            description: 'Get a contact by ID',
+            action: 'Get a contact',
+          },
+          {
+            name: 'List',
+            value: 'list',
+            description: 'List all contacts',
+            action: 'List contacts',
+          },
+          {
+            name: 'Update',
+            value: 'update',
+            description: 'Update a contact',
+            action: 'Update a contact',
+          },
+        ],
+        default: 'create',
+      },
+      // ==================== ACCOUNT OPERATIONS ====================
+      {
+        displayName: 'Operation',
+        name: 'operation',
+        type: 'options',
+        noDataExpression: true,
+        displayOptions: {
+          show: {
+            resource: ['account'],
+          },
+        },
+        options: [
+          {
+            name: 'Create',
+            value: 'create',
+            description: 'Create a new account',
+            action: 'Create an account',
+          },
+          {
+            name: 'Delete',
+            value: 'delete',
+            description: 'Delete an account',
+            action: 'Delete an account',
+          },
+          {
+            name: 'Get',
+            value: 'get',
+            description: 'Get an account by ID',
+            action: 'Get an account',
+          },
+          {
+            name: 'List',
+            value: 'list',
+            description: 'List all accounts',
+            action: 'List accounts',
+          },
+          {
+            name: 'Update',
+            value: 'update',
+            description: 'Update an account',
+            action: 'Update an account',
           },
         ],
         default: 'create',
@@ -761,22 +1017,6 @@ export class ZohoDesk implements INodeType {
         },
         options: [
           {
-            displayName: 'Secondary Contacts',
-            name: 'secondaryContacts',
-            type: 'string',
-            default: '',
-            description: 'Comma-separated list of contact IDs for secondary contacts',
-            placeholder: '1892000000042038, 1892000000042042',
-          },
-          {
-            displayName: 'Custom Fields',
-            name: 'cf',
-            type: 'json',
-            default: '',
-            description: 'Custom fields as JSON object',
-            placeholder: '{"cf_modelname": "F3 2017", "cf_phone": "123456"}',
-          },
-          {
             displayName: 'Account ID',
             name: 'accountId',
             type: 'string',
@@ -803,8 +1043,24 @@ export class ZohoDesk implements INodeType {
             type: 'options',
             options: [
               {
+                name: 'Chat',
+                value: 'CHAT',
+              },
+              {
                 name: 'Email',
                 value: 'EMAIL',
+              },
+              {
+                name: 'Facebook',
+                value: 'FACEBOOK',
+              },
+              {
+                name: 'Feedback Widget',
+                value: 'FEEDBACK_WIDGET',
+              },
+              {
+                name: 'Forums',
+                value: 'FORUMS',
               },
               {
                 name: 'Phone',
@@ -815,28 +1071,20 @@ export class ZohoDesk implements INodeType {
                 value: 'TWITTER',
               },
               {
-                name: 'Facebook',
-                value: 'FACEBOOK',
-              },
-              {
-                name: 'Chat',
-                value: 'CHAT',
-              },
-              {
-                name: 'Forums',
-                value: 'FORUMS',
-              },
-              {
-                name: 'Feedback Widget',
-                value: 'FEEDBACK_WIDGET',
-              },
-              {
                 name: 'Web',
                 value: 'WEB',
               },
             ],
             default: 'EMAIL',
             description: 'The channel through which the ticket was created',
+          },
+          {
+            displayName: 'Custom Fields',
+            name: 'cf',
+            type: 'json',
+            default: '',
+            description: 'Custom fields as JSON object',
+            placeholder: '{"cf_modelname": "F3 2017", "cf_phone": "123456"}',
           },
           {
             displayName: 'Email',
@@ -878,6 +1126,14 @@ export class ZohoDesk implements INodeType {
             description: 'Resolution content of the ticket',
           },
           {
+            displayName: 'Secondary Contacts',
+            name: 'secondaryContacts',
+            type: 'string',
+            default: '',
+            description: 'Comma-separated list of contact IDs for secondary contacts',
+            placeholder: '1892000000042038, 1892000000042042',
+          },
+          {
             displayName: 'Status',
             name: 'status',
             type: 'string',
@@ -893,7 +1149,7 @@ export class ZohoDesk implements INodeType {
           },
         ],
       },
-      // Update Operation Fields
+      // ==================== TICKET: GET/DELETE/UPDATE/ADDCOMMENT/LISTTHREADS ====================
       {
         displayName: 'Ticket ID',
         name: 'ticketId',
@@ -902,12 +1158,143 @@ export class ZohoDesk implements INodeType {
         displayOptions: {
           show: {
             resource: ['ticket'],
-            operation: ['update'],
+            operation: ['get', 'delete', 'update', 'addComment', 'listThreads'],
           },
         },
         default: '',
-        description: 'The ID of the ticket to update',
+        description: 'The ID of the ticket',
       },
+      // ==================== TICKET: LIST ====================
+      {
+        displayName: 'Return All',
+        name: 'returnAll',
+        type: 'boolean',
+        displayOptions: {
+          show: {
+            resource: ['ticket'],
+            operation: ['list'],
+          },
+        },
+        default: false,
+        description: 'Whether to return all results or only up to a given limit',
+      },
+      {
+        displayName: 'Limit',
+        name: 'limit',
+        type: 'number',
+        displayOptions: {
+          show: {
+            resource: ['ticket'],
+            operation: ['list'],
+            returnAll: [false],
+          },
+        },
+        typeOptions: {
+          minValue: 1,
+        },
+        default: 50,
+        description: 'Max number of results to return',
+      },
+      {
+        displayName: 'Filters',
+        name: 'filters',
+        type: 'collection',
+        placeholder: 'Add Filter',
+        default: {},
+        displayOptions: {
+          show: {
+            resource: ['ticket'],
+            operation: ['list'],
+          },
+        },
+        options: [
+          {
+            displayName: 'Assignee ID',
+            name: 'assigneeId',
+            type: 'string',
+            default: '',
+            description: 'Filter by assignee ID',
+          },
+          {
+            displayName: 'Department ID',
+            name: 'departmentId',
+            type: 'string',
+            default: '',
+            description: 'Filter by department ID',
+          },
+          {
+            displayName: 'Status',
+            name: 'status',
+            type: 'string',
+            default: '',
+            description: 'Filter by status (e.g., Open, On Hold, Closed)',
+          },
+        ],
+      },
+      // ==================== TICKET: ADD COMMENT ====================
+      {
+        displayName: 'Comment Content',
+        name: 'content',
+        type: 'string',
+        typeOptions: {
+          rows: 4,
+        },
+        required: true,
+        displayOptions: {
+          show: {
+            resource: ['ticket'],
+            operation: ['addComment'],
+          },
+        },
+        default: '',
+        description: 'The content of the comment',
+      },
+      {
+        displayName: 'Is Public',
+        name: 'isPublic',
+        type: 'boolean',
+        displayOptions: {
+          show: {
+            resource: ['ticket'],
+            operation: ['addComment'],
+          },
+        },
+        default: true,
+        description:
+          'Whether the comment is visible to customers (public) or internal only (private)',
+      },
+      // ==================== TICKET: LIST THREADS ====================
+      {
+        displayName: 'Return All',
+        name: 'returnAll',
+        type: 'boolean',
+        displayOptions: {
+          show: {
+            resource: ['ticket'],
+            operation: ['listThreads'],
+          },
+        },
+        default: false,
+        description: 'Whether to return all threads or only up to a given limit',
+      },
+      {
+        displayName: 'Limit',
+        name: 'limit',
+        type: 'number',
+        displayOptions: {
+          show: {
+            resource: ['ticket'],
+            operation: ['listThreads'],
+            returnAll: [false],
+          },
+        },
+        typeOptions: {
+          minValue: 1,
+        },
+        default: 50,
+        description: 'Max number of results to return',
+      },
+      // ==================== TICKET: UPDATE ====================
       {
         displayName: 'Description',
         name: 'description',
@@ -937,55 +1324,6 @@ export class ZohoDesk implements INodeType {
           },
         },
         options: [
-          {
-            displayName: 'Due Date',
-            name: 'dueDate',
-            type: 'dateTime',
-            default: '',
-            description:
-              'The due date for resolving the ticket (leave empty to keep current due date)',
-          },
-          {
-            displayName: 'Priority',
-            name: 'priority',
-            type: 'options',
-            options: [
-              {
-                name: 'No Change',
-                value: '',
-              },
-              {
-                name: 'Low',
-                value: 'Low',
-              },
-              {
-                name: 'Medium',
-                value: 'Medium',
-              },
-              {
-                name: 'High',
-                value: 'High',
-              },
-            ],
-            default: '',
-            description: 'Priority of the ticket',
-          },
-          {
-            displayName: 'Secondary Contacts',
-            name: 'secondaryContacts',
-            type: 'string',
-            default: '',
-            description: 'Comma-separated list of contact IDs for secondary contacts',
-            placeholder: '1892000000042038, 1892000000042042',
-          },
-          {
-            displayName: 'Custom Fields',
-            name: 'cf',
-            type: 'json',
-            default: '',
-            description: 'Custom fields as JSON object',
-            placeholder: '{"cf_modelname": "F3 2017", "cf_phone": "123456"}',
-          },
           {
             displayName: 'Account ID',
             name: 'accountId',
@@ -1017,20 +1355,20 @@ export class ZohoDesk implements INodeType {
                 value: '',
               },
               {
-                name: 'Question',
-                value: 'Question',
+                name: 'Others',
+                value: 'Others',
               },
               {
                 name: 'Problem',
                 value: 'Problem',
               },
               {
-                name: 'Request',
-                value: 'Request',
+                name: 'Question',
+                value: 'Question',
               },
               {
-                name: 'Others',
-                value: 'Others',
+                name: 'Request',
+                value: 'Request',
               },
             ],
             default: '',
@@ -1044,6 +1382,14 @@ export class ZohoDesk implements INodeType {
             description: 'The ID of the contact who raised the ticket',
           },
           {
+            displayName: 'Custom Fields',
+            name: 'cf',
+            type: 'json',
+            default: '',
+            description: 'Custom fields as JSON object',
+            placeholder: '{"cf_modelname": "F3 2017", "cf_phone": "123456"}',
+          },
+          {
             displayName: 'Department Name or ID',
             name: 'departmentId',
             type: 'options',
@@ -1053,6 +1399,14 @@ export class ZohoDesk implements INodeType {
             default: '',
             description:
               'The department to which the ticket belongs. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+          },
+          {
+            displayName: 'Due Date',
+            name: 'dueDate',
+            type: 'dateTime',
+            default: '',
+            description:
+              'The due date for resolving the ticket (leave empty to keep current due date)',
           },
           {
             displayName: 'Email',
@@ -1077,6 +1431,31 @@ export class ZohoDesk implements INodeType {
             description: 'Phone number of the contact',
           },
           {
+            displayName: 'Priority',
+            name: 'priority',
+            type: 'options',
+            options: [
+              {
+                name: 'No Change',
+                value: '',
+              },
+              {
+                name: 'Low',
+                value: 'Low',
+              },
+              {
+                name: 'Medium',
+                value: 'Medium',
+              },
+              {
+                name: 'High',
+                value: 'High',
+              },
+            ],
+            default: '',
+            description: 'Priority of the ticket',
+          },
+          {
             displayName: 'Product ID',
             name: 'productId',
             type: 'string',
@@ -1092,6 +1471,14 @@ export class ZohoDesk implements INodeType {
             },
             default: '',
             description: 'Resolution content of the ticket',
+          },
+          {
+            displayName: 'Secondary Contacts',
+            name: 'secondaryContacts',
+            type: 'string',
+            default: '',
+            description: 'Comma-separated list of contact IDs for secondary contacts',
+            placeholder: '1892000000042038, 1892000000042042',
           },
           {
             displayName: 'Status',
@@ -1125,6 +1512,539 @@ export class ZohoDesk implements INodeType {
             default: '',
             description:
               'The team assigned to the ticket. Note: Teams will only load if Department is selected first. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+          },
+        ],
+      },
+      // ==================== CONTACT PARAMETERS ====================
+      // Contact: Create
+      {
+        displayName: 'Last Name',
+        name: 'lastName',
+        type: 'string',
+        required: true,
+        displayOptions: {
+          show: {
+            resource: ['contact'],
+            operation: ['create'],
+          },
+        },
+        default: '',
+        description: 'Last name of the contact',
+      },
+      {
+        displayName: 'Email',
+        name: 'email',
+        type: 'string',
+        placeholder: 'name@email.com',
+        required: true,
+        displayOptions: {
+          show: {
+            resource: ['contact'],
+            operation: ['create'],
+          },
+        },
+        default: '',
+        description: 'Email address of the contact',
+      },
+      {
+        displayName: 'Additional Fields',
+        name: 'additionalFields',
+        type: 'collection',
+        placeholder: 'Add Field',
+        default: {},
+        displayOptions: {
+          show: {
+            resource: ['contact'],
+            operation: ['create'],
+          },
+        },
+        options: [
+          {
+            displayName: 'Account ID',
+            name: 'accountId',
+            type: 'string',
+            default: '',
+            description: 'The ID of the account associated with this contact',
+          },
+          {
+            displayName: 'Custom Fields',
+            name: 'cf',
+            type: 'json',
+            default: '',
+            description: 'Custom fields as JSON object',
+            placeholder: '{"cf_field": "value"}',
+          },
+          {
+            displayName: 'Description',
+            name: 'description',
+            type: 'string',
+            typeOptions: {
+              rows: 4,
+            },
+            default: '',
+            description: 'Description of the contact',
+          },
+          {
+            displayName: 'Facebook',
+            name: 'facebook',
+            type: 'string',
+            default: '',
+            description: 'Facebook handle of the contact',
+          },
+          {
+            displayName: 'First Name',
+            name: 'firstName',
+            type: 'string',
+            default: '',
+            description: 'First name of the contact',
+          },
+          {
+            displayName: 'Mobile',
+            name: 'mobile',
+            type: 'string',
+            default: '',
+            description: 'Mobile number of the contact',
+          },
+          {
+            displayName: 'Phone',
+            name: 'phone',
+            type: 'string',
+            default: '',
+            description: 'Phone number of the contact',
+          },
+          {
+            displayName: 'Twitter',
+            name: 'twitter',
+            type: 'string',
+            default: '',
+            description: 'Twitter handle of the contact',
+          },
+          {
+            displayName: 'Type',
+            name: 'type',
+            type: 'string',
+            default: '',
+            description: 'Type of the contact',
+          },
+        ],
+      },
+      // Contact: Get/Delete/Update
+      {
+        displayName: 'Contact ID',
+        name: 'contactId',
+        type: 'string',
+        required: true,
+        displayOptions: {
+          show: {
+            resource: ['contact'],
+            operation: ['get', 'delete', 'update'],
+          },
+        },
+        default: '',
+        description: 'The ID of the contact',
+      },
+      // Contact: List
+      {
+        displayName: 'Return All',
+        name: 'returnAll',
+        type: 'boolean',
+        displayOptions: {
+          show: {
+            resource: ['contact'],
+            operation: ['list'],
+          },
+        },
+        default: false,
+        description: 'Whether to return all results or only up to a given limit',
+      },
+      {
+        displayName: 'Limit',
+        name: 'limit',
+        type: 'number',
+        displayOptions: {
+          show: {
+            resource: ['contact'],
+            operation: ['list'],
+            returnAll: [false],
+          },
+        },
+        typeOptions: {
+          minValue: 1,
+        },
+        default: 50,
+        description: 'Max number of results to return',
+      },
+      // Contact: Update
+      {
+        displayName: 'Update Fields',
+        name: 'updateFields',
+        type: 'collection',
+        placeholder: 'Add Field',
+        default: {},
+        displayOptions: {
+          show: {
+            resource: ['contact'],
+            operation: ['update'],
+          },
+        },
+        options: [
+          {
+            displayName: 'Account ID',
+            name: 'accountId',
+            type: 'string',
+            default: '',
+            description: 'The ID of the account associated with this contact',
+          },
+          {
+            displayName: 'Custom Fields',
+            name: 'cf',
+            type: 'json',
+            default: '',
+            description: 'Custom fields as JSON object',
+            placeholder: '{"cf_field": "value"}',
+          },
+          {
+            displayName: 'Description',
+            name: 'description',
+            type: 'string',
+            typeOptions: {
+              rows: 4,
+            },
+            default: '',
+            description: 'Description of the contact',
+          },
+          {
+            displayName: 'Email',
+            name: 'email',
+            type: 'string',
+            placeholder: 'name@email.com',
+            default: '',
+            description: 'Email address of the contact',
+          },
+          {
+            displayName: 'Facebook',
+            name: 'facebook',
+            type: 'string',
+            default: '',
+            description: 'Facebook handle of the contact',
+          },
+          {
+            displayName: 'First Name',
+            name: 'firstName',
+            type: 'string',
+            default: '',
+            description: 'First name of the contact',
+          },
+          {
+            displayName: 'Last Name',
+            name: 'lastName',
+            type: 'string',
+            default: '',
+            description: 'Last name of the contact',
+          },
+          {
+            displayName: 'Mobile',
+            name: 'mobile',
+            type: 'string',
+            default: '',
+            description: 'Mobile number of the contact',
+          },
+          {
+            displayName: 'Phone',
+            name: 'phone',
+            type: 'string',
+            default: '',
+            description: 'Phone number of the contact',
+          },
+          {
+            displayName: 'Twitter',
+            name: 'twitter',
+            type: 'string',
+            default: '',
+            description: 'Twitter handle of the contact',
+          },
+          {
+            displayName: 'Type',
+            name: 'type',
+            type: 'string',
+            default: '',
+            description: 'Type of the contact',
+          },
+        ],
+      },
+      // ==================== ACCOUNT PARAMETERS ====================
+      // Account: Create
+      {
+        displayName: 'Account Name',
+        name: 'accountName',
+        type: 'string',
+        required: true,
+        displayOptions: {
+          show: {
+            resource: ['account'],
+            operation: ['create'],
+          },
+        },
+        default: '',
+        description: 'Name of the account',
+      },
+      {
+        displayName: 'Additional Fields',
+        name: 'additionalFields',
+        type: 'collection',
+        placeholder: 'Add Field',
+        default: {},
+        displayOptions: {
+          show: {
+            resource: ['account'],
+            operation: ['create'],
+          },
+        },
+        options: [
+          {
+            displayName: 'City',
+            name: 'city',
+            type: 'string',
+            default: '',
+            description: 'City of the account',
+          },
+          {
+            displayName: 'Code',
+            name: 'code',
+            type: 'string',
+            default: '',
+            description: 'Account code',
+          },
+          {
+            displayName: 'Country',
+            name: 'country',
+            type: 'string',
+            default: '',
+            description: 'Country of the account',
+          },
+          {
+            displayName: 'Custom Fields',
+            name: 'cf',
+            type: 'json',
+            default: '',
+            description: 'Custom fields as JSON object',
+            placeholder: '{"cf_field": "value"}',
+          },
+          {
+            displayName: 'Description',
+            name: 'description',
+            type: 'string',
+            typeOptions: {
+              rows: 4,
+            },
+            default: '',
+            description: 'Description of the account',
+          },
+          {
+            displayName: 'Fax',
+            name: 'fax',
+            type: 'string',
+            default: '',
+            description: 'Fax number of the account',
+          },
+          {
+            displayName: 'Industry',
+            name: 'industry',
+            type: 'string',
+            default: '',
+            description: 'Industry of the account',
+          },
+          {
+            displayName: 'Phone',
+            name: 'phone',
+            type: 'string',
+            default: '',
+            description: 'Phone number of the account',
+          },
+          {
+            displayName: 'State',
+            name: 'state',
+            type: 'string',
+            default: '',
+            description: 'State of the account',
+          },
+          {
+            displayName: 'Street',
+            name: 'street',
+            type: 'string',
+            default: '',
+            description: 'Street address of the account',
+          },
+          {
+            displayName: 'Website',
+            name: 'website',
+            type: 'string',
+            default: '',
+            description: 'Website URL of the account',
+          },
+          {
+            displayName: 'Zip',
+            name: 'zip',
+            type: 'string',
+            default: '',
+            description: 'ZIP/Postal code of the account',
+          },
+        ],
+      },
+      // Account: Get/Delete/Update
+      {
+        displayName: 'Account ID',
+        name: 'accountId',
+        type: 'string',
+        required: true,
+        displayOptions: {
+          show: {
+            resource: ['account'],
+            operation: ['get', 'delete', 'update'],
+          },
+        },
+        default: '',
+        description: 'The ID of the account',
+      },
+      // Account: List
+      {
+        displayName: 'Return All',
+        name: 'returnAll',
+        type: 'boolean',
+        displayOptions: {
+          show: {
+            resource: ['account'],
+            operation: ['list'],
+          },
+        },
+        default: false,
+        description: 'Whether to return all results or only up to a given limit',
+      },
+      {
+        displayName: 'Limit',
+        name: 'limit',
+        type: 'number',
+        displayOptions: {
+          show: {
+            resource: ['account'],
+            operation: ['list'],
+            returnAll: [false],
+          },
+        },
+        typeOptions: {
+          minValue: 1,
+        },
+        default: 50,
+        description: 'Max number of results to return',
+      },
+      // Account: Update
+      {
+        displayName: 'Update Fields',
+        name: 'updateFields',
+        type: 'collection',
+        placeholder: 'Add Field',
+        default: {},
+        displayOptions: {
+          show: {
+            resource: ['account'],
+            operation: ['update'],
+          },
+        },
+        options: [
+          {
+            displayName: 'Account Name',
+            name: 'accountName',
+            type: 'string',
+            default: '',
+            description: 'Name of the account',
+          },
+          {
+            displayName: 'City',
+            name: 'city',
+            type: 'string',
+            default: '',
+            description: 'City of the account',
+          },
+          {
+            displayName: 'Code',
+            name: 'code',
+            type: 'string',
+            default: '',
+            description: 'Account code',
+          },
+          {
+            displayName: 'Country',
+            name: 'country',
+            type: 'string',
+            default: '',
+            description: 'Country of the account',
+          },
+          {
+            displayName: 'Custom Fields',
+            name: 'cf',
+            type: 'json',
+            default: '',
+            description: 'Custom fields as JSON object',
+            placeholder: '{"cf_field": "value"}',
+          },
+          {
+            displayName: 'Description',
+            name: 'description',
+            type: 'string',
+            typeOptions: {
+              rows: 4,
+            },
+            default: '',
+            description: 'Description of the account',
+          },
+          {
+            displayName: 'Fax',
+            name: 'fax',
+            type: 'string',
+            default: '',
+            description: 'Fax number of the account',
+          },
+          {
+            displayName: 'Industry',
+            name: 'industry',
+            type: 'string',
+            default: '',
+            description: 'Industry of the account',
+          },
+          {
+            displayName: 'Phone',
+            name: 'phone',
+            type: 'string',
+            default: '',
+            description: 'Phone number of the account',
+          },
+          {
+            displayName: 'State',
+            name: 'state',
+            type: 'string',
+            default: '',
+            description: 'State of the account',
+          },
+          {
+            displayName: 'Street',
+            name: 'street',
+            type: 'string',
+            default: '',
+            description: 'Street address of the account',
+          },
+          {
+            displayName: 'Website',
+            name: 'website',
+            type: 'string',
+            default: '',
+            description: 'Website URL of the account',
+          },
+          {
+            displayName: 'Zip',
+            name: 'zip',
+            type: 'string',
+            default: '',
+            description: 'ZIP/Postal code of the account',
           },
         ],
       },
@@ -1165,7 +2085,7 @@ export class ZohoDesk implements INodeType {
             !('data' in response) ||
             !Array.isArray(response.data)
           ) {
-            throw new Error('Invalid API response structure from Zoho Desk');
+            throw new ApplicationError('Invalid API response structure from Zoho Desk');
           }
 
           const typedResponse = response as ZohoDeskListResponse<ZohoDeskDepartment>;
@@ -1220,14 +2140,14 @@ export class ZohoDesk implements INodeType {
           // Runtime validation of API response structure with detailed error reporting
           // Note: Teams endpoint uses 'teams' property instead of 'data'
           if (!response || typeof response !== 'object') {
-            throw new Error(
+            throw new ApplicationError(
               `Invalid API response structure from Zoho Desk. Expected an object, received: ${typeof response}. ` +
                 `Response: ${JSON.stringify(response)}`,
             );
           }
 
           if (!('teams' in response)) {
-            throw new Error(
+            throw new ApplicationError(
               `Invalid API response structure from Zoho Desk. Missing 'teams' property. ` +
                 `Response keys: ${Object.keys(response).join(', ')}. ` +
                 `Response: ${JSON.stringify(response)}`,
@@ -1235,7 +2155,7 @@ export class ZohoDesk implements INodeType {
           }
 
           if (!Array.isArray(response.teams)) {
-            throw new Error(
+            throw new ApplicationError(
               `Invalid API response structure from Zoho Desk. Expected 'teams' to be an array, received: ${typeof response.teams}. ` +
                 `Response: ${JSON.stringify(response)}`,
             );
@@ -1329,7 +2249,8 @@ export class ZohoDesk implements INodeType {
 
               // Type guard for contactValues using isPlainObject helper
               if (!isPlainObject(contactValues)) {
-                throw new Error(
+                throw new NodeOperationError(
+                  this.getNode(),
                   'Contact validation failed: Invalid contact data format. ' +
                     'See: ' +
                     ZOHO_DESK_CREATE_TICKET_DOCS,
@@ -1364,7 +2285,8 @@ export class ZohoDesk implements INodeType {
                 // Validation: if contact has values, ensure at least email or lastName is present
                 // This catches edge cases where only firstName/phone are provided
                 if (!contact.email && !contact.lastName) {
-                  throw new Error(
+                  throw new NodeOperationError(
+                    this.getNode(),
                     'Contact validation failed: Either email or lastName must be provided. ' +
                       'See: ' +
                       ZOHO_DESK_CREATE_TICKET_DOCS,
@@ -1413,7 +2335,8 @@ export class ZohoDesk implements INodeType {
 
             // Validate ticket ID format (should be numeric)
             if (!isValidTicketId(ticketId)) {
-              throw new Error(
+              throw new NodeOperationError(
+                this.getNode(),
                 `Invalid ticket ID format: "${ticketId}". Ticket ID must be a numeric value. ` +
                   'See: ' +
                   ZOHO_DESK_UPDATE_TICKET_DOCS,
@@ -1451,6 +2374,529 @@ export class ZohoDesk implements INodeType {
 
             returnData.push({
               json: response,
+              pairedItem: { item: i },
+            });
+          }
+
+          if (operation === 'get') {
+            const ticketId = this.getNodeParameter('ticketId', i) as string;
+
+            if (!isValidTicketId(ticketId)) {
+              throw new NodeOperationError(
+                this.getNode(),
+                `Invalid ticket ID format: "${ticketId}". Ticket ID must be a numeric value. ` +
+                  'See: ' +
+                  ZOHO_DESK_GET_TICKET_DOCS,
+              );
+            }
+
+            const options = {
+              method: 'GET',
+              headers: { orgId },
+              uri: `${baseUrl}/tickets/${encodeURIComponent(ticketId)}`,
+              json: true,
+            };
+
+            const response = await this.helpers.requestOAuth2.call(
+              this,
+              'zohoDeskOAuth2Api',
+              options,
+            );
+
+            returnData.push({
+              json: response,
+              pairedItem: { item: i },
+            });
+          }
+
+          if (operation === 'list') {
+            const returnAll = this.getNodeParameter('returnAll', i) as boolean;
+            const filters = this.getNodeParameter('filters', i) as IDataObject;
+
+            // Build query params from filters
+            const queryParams: IDataObject = {};
+            if (filters.departmentId) queryParams.departmentId = filters.departmentId;
+            if (filters.assigneeId) queryParams.assigneeId = filters.assigneeId;
+            if (filters.status) queryParams.status = filters.status;
+
+            if (returnAll) {
+              const items = await getAllPaginatedItems(
+                this,
+                baseUrl,
+                '/tickets',
+                orgId,
+                100,
+                'data',
+                queryParams,
+              );
+              for (const item of items) {
+                returnData.push({
+                  json: item,
+                  pairedItem: { item: i },
+                });
+              }
+            } else {
+              const limit = this.getNodeParameter('limit', i) as number;
+              const options = {
+                method: 'GET',
+                headers: { orgId },
+                uri: `${baseUrl}/tickets`,
+                qs: { from: 1, limit, ...queryParams },
+                json: true,
+              };
+
+              const response = await this.helpers.requestOAuth2.call(
+                this,
+                'zohoDeskOAuth2Api',
+                options,
+              );
+
+              for (const ticket of (response.data as IDataObject[]) || []) {
+                returnData.push({
+                  json: ticket,
+                  pairedItem: { item: i },
+                });
+              }
+            }
+          }
+
+          if (operation === 'delete') {
+            const ticketId = this.getNodeParameter('ticketId', i) as string;
+
+            if (!isValidTicketId(ticketId)) {
+              throw new NodeOperationError(
+                this.getNode(),
+                `Invalid ticket ID format: "${ticketId}". Ticket ID must be a numeric value. ` +
+                  'See: ' +
+                  ZOHO_DESK_UPDATE_TICKET_DOCS,
+              );
+            }
+
+            const options = {
+              method: 'POST',
+              headers: { orgId },
+              uri: `${baseUrl}/tickets/moveToTrash`,
+              body: { ticketIds: [ticketId] },
+              json: true,
+            };
+
+            await this.helpers.requestOAuth2.call(this, 'zohoDeskOAuth2Api', options);
+
+            returnData.push({
+              json: { success: true, ticketId },
+              pairedItem: { item: i },
+            });
+          }
+
+          if (operation === 'addComment') {
+            const ticketId = this.getNodeParameter('ticketId', i) as string;
+            const content = this.getNodeParameter('content', i) as string;
+            const isPublic = this.getNodeParameter('isPublic', i) as boolean;
+
+            if (!isValidTicketId(ticketId)) {
+              throw new NodeOperationError(
+                this.getNode(),
+                `Invalid ticket ID format: "${ticketId}". Ticket ID must be a numeric value. ` +
+                  'See: ' +
+                  ZOHO_DESK_COMMENTS_DOCS,
+              );
+            }
+
+            const body: IDataObject = {
+              content: validateFieldLength(content, undefined, 'Comment Content'),
+              isPublic,
+            };
+
+            const options = {
+              method: 'POST',
+              headers: { orgId },
+              uri: `${baseUrl}/tickets/${encodeURIComponent(ticketId)}/comments`,
+              body,
+              json: true,
+            };
+
+            const response = await this.helpers.requestOAuth2.call(
+              this,
+              'zohoDeskOAuth2Api',
+              options,
+            );
+
+            returnData.push({
+              json: response,
+              pairedItem: { item: i },
+            });
+          }
+
+          if (operation === 'listThreads') {
+            const ticketId = this.getNodeParameter('ticketId', i) as string;
+            const returnAll = this.getNodeParameter('returnAll', i) as boolean;
+
+            if (!isValidTicketId(ticketId)) {
+              throw new NodeOperationError(
+                this.getNode(),
+                `Invalid ticket ID format: "${ticketId}". Ticket ID must be a numeric value. ` +
+                  'See: ' +
+                  ZOHO_DESK_THREADS_DOCS,
+              );
+            }
+
+            if (returnAll) {
+              const items = await getAllPaginatedItems(
+                this,
+                baseUrl,
+                `/tickets/${encodeURIComponent(ticketId)}/conversations`,
+                orgId,
+                100,
+                'data',
+              );
+              for (const item of items) {
+                returnData.push({
+                  json: item,
+                  pairedItem: { item: i },
+                });
+              }
+            } else {
+              const limit = this.getNodeParameter('limit', i) as number;
+              const options = {
+                method: 'GET',
+                headers: { orgId },
+                uri: `${baseUrl}/tickets/${encodeURIComponent(ticketId)}/conversations`,
+                qs: { from: 1, limit },
+                json: true,
+              };
+
+              const response = await this.helpers.requestOAuth2.call(
+                this,
+                'zohoDeskOAuth2Api',
+                options,
+              );
+
+              for (const thread of (response.data as IDataObject[]) || []) {
+                returnData.push({
+                  json: thread,
+                  pairedItem: { item: i },
+                });
+              }
+            }
+          }
+        }
+
+        // ==================== CONTACT RESOURCE ====================
+        if (resource === 'contact') {
+          if (operation === 'create') {
+            const lastName = this.getNodeParameter('lastName', i) as string;
+            const email = this.getNodeParameter('email', i) as string;
+            const additionalFields = this.getNodeParameter('additionalFields', i) as IDataObject;
+
+            if (!isValidEmail(email)) {
+              throw new NodeOperationError(
+                this.getNode(),
+                `Invalid email format: "${email}". See: ${ZOHO_DESK_CONTACTS_DOCS}`,
+              );
+            }
+
+            const body: IDataObject = {
+              lastName: validateFieldLength(lastName, undefined, 'Last Name'),
+              email: validateFieldLength(email, FIELD_LENGTH_LIMITS.email, 'Email'),
+            };
+
+            addOptionalFields(body, additionalFields, CONTACT_CREATE_OPTIONAL_FIELDS);
+
+            if (additionalFields.cf !== undefined) {
+              body.cf = parseCustomFields(additionalFields.cf);
+            }
+
+            const options = {
+              method: 'POST',
+              headers: { orgId },
+              uri: `${baseUrl}/contacts`,
+              body,
+              json: true,
+            };
+
+            const response = await this.helpers.requestOAuth2.call(
+              this,
+              'zohoDeskOAuth2Api',
+              options,
+            );
+
+            returnData.push({
+              json: response,
+              pairedItem: { item: i },
+            });
+          }
+
+          if (operation === 'get') {
+            const contactId = this.getNodeParameter('contactId', i) as string;
+            isValidZohoDeskId(contactId, 'Contact ID');
+
+            const options = {
+              method: 'GET',
+              headers: { orgId },
+              uri: `${baseUrl}/contacts/${encodeURIComponent(contactId)}`,
+              json: true,
+            };
+
+            const response = await this.helpers.requestOAuth2.call(
+              this,
+              'zohoDeskOAuth2Api',
+              options,
+            );
+
+            returnData.push({
+              json: response,
+              pairedItem: { item: i },
+            });
+          }
+
+          if (operation === 'list') {
+            const returnAll = this.getNodeParameter('returnAll', i) as boolean;
+
+            if (returnAll) {
+              const items = await getAllPaginatedItems(
+                this,
+                baseUrl,
+                '/contacts',
+                orgId,
+                100,
+                'data',
+              );
+              for (const item of items) {
+                returnData.push({
+                  json: item,
+                  pairedItem: { item: i },
+                });
+              }
+            } else {
+              const limit = this.getNodeParameter('limit', i) as number;
+              const options = {
+                method: 'GET',
+                headers: { orgId },
+                uri: `${baseUrl}/contacts`,
+                qs: { from: 1, limit },
+                json: true,
+              };
+
+              const response = await this.helpers.requestOAuth2.call(
+                this,
+                'zohoDeskOAuth2Api',
+                options,
+              );
+
+              for (const contact of (response.data as IDataObject[]) || []) {
+                returnData.push({
+                  json: contact,
+                  pairedItem: { item: i },
+                });
+              }
+            }
+          }
+
+          if (operation === 'update') {
+            const contactId = this.getNodeParameter('contactId', i) as string;
+            const updateFields = this.getNodeParameter('updateFields', i) as IDataObject;
+
+            isValidZohoDeskId(contactId, 'Contact ID');
+
+            const body: IDataObject = {};
+            addOptionalFields(body, updateFields, CONTACT_UPDATE_OPTIONAL_FIELDS);
+
+            if (updateFields.cf !== undefined) {
+              body.cf = parseCustomFields(updateFields.cf);
+            }
+
+            const options = {
+              method: 'PATCH',
+              headers: { orgId },
+              uri: `${baseUrl}/contacts/${encodeURIComponent(contactId)}`,
+              body,
+              json: true,
+            };
+
+            const response = await this.helpers.requestOAuth2.call(
+              this,
+              'zohoDeskOAuth2Api',
+              options,
+            );
+
+            returnData.push({
+              json: response,
+              pairedItem: { item: i },
+            });
+          }
+
+          if (operation === 'delete') {
+            const contactId = this.getNodeParameter('contactId', i) as string;
+            isValidZohoDeskId(contactId, 'Contact ID');
+
+            const options = {
+              method: 'POST',
+              headers: { orgId },
+              uri: `${baseUrl}/contacts/moveToTrash`,
+              body: { contactIds: [contactId] },
+              json: true,
+            };
+
+            await this.helpers.requestOAuth2.call(this, 'zohoDeskOAuth2Api', options);
+
+            returnData.push({
+              json: { success: true, contactId },
+              pairedItem: { item: i },
+            });
+          }
+        }
+
+        // ==================== ACCOUNT RESOURCE ====================
+        if (resource === 'account') {
+          if (operation === 'create') {
+            const accountName = this.getNodeParameter('accountName', i) as string;
+            const additionalFields = this.getNodeParameter('additionalFields', i) as IDataObject;
+
+            const body: IDataObject = {
+              accountName: validateFieldLength(accountName, undefined, 'Account Name'),
+            };
+
+            addOptionalFields(body, additionalFields, ACCOUNT_CREATE_OPTIONAL_FIELDS);
+
+            if (additionalFields.cf !== undefined) {
+              body.cf = parseCustomFields(additionalFields.cf);
+            }
+
+            const options = {
+              method: 'POST',
+              headers: { orgId },
+              uri: `${baseUrl}/accounts`,
+              body,
+              json: true,
+            };
+
+            const response = await this.helpers.requestOAuth2.call(
+              this,
+              'zohoDeskOAuth2Api',
+              options,
+            );
+
+            returnData.push({
+              json: response,
+              pairedItem: { item: i },
+            });
+          }
+
+          if (operation === 'get') {
+            const accountId = this.getNodeParameter('accountId', i) as string;
+            isValidZohoDeskId(accountId, 'Account ID');
+
+            const options = {
+              method: 'GET',
+              headers: { orgId },
+              uri: `${baseUrl}/accounts/${encodeURIComponent(accountId)}`,
+              json: true,
+            };
+
+            const response = await this.helpers.requestOAuth2.call(
+              this,
+              'zohoDeskOAuth2Api',
+              options,
+            );
+
+            returnData.push({
+              json: response,
+              pairedItem: { item: i },
+            });
+          }
+
+          if (operation === 'list') {
+            const returnAll = this.getNodeParameter('returnAll', i) as boolean;
+
+            if (returnAll) {
+              const items = await getAllPaginatedItems(
+                this,
+                baseUrl,
+                '/accounts',
+                orgId,
+                100,
+                'data',
+              );
+              for (const item of items) {
+                returnData.push({
+                  json: item,
+                  pairedItem: { item: i },
+                });
+              }
+            } else {
+              const limit = this.getNodeParameter('limit', i) as number;
+              const options = {
+                method: 'GET',
+                headers: { orgId },
+                uri: `${baseUrl}/accounts`,
+                qs: { from: 1, limit },
+                json: true,
+              };
+
+              const response = await this.helpers.requestOAuth2.call(
+                this,
+                'zohoDeskOAuth2Api',
+                options,
+              );
+
+              for (const account of (response.data as IDataObject[]) || []) {
+                returnData.push({
+                  json: account,
+                  pairedItem: { item: i },
+                });
+              }
+            }
+          }
+
+          if (operation === 'update') {
+            const accountId = this.getNodeParameter('accountId', i) as string;
+            const updateFields = this.getNodeParameter('updateFields', i) as IDataObject;
+
+            isValidZohoDeskId(accountId, 'Account ID');
+
+            const body: IDataObject = {};
+            addOptionalFields(body, updateFields, ACCOUNT_UPDATE_OPTIONAL_FIELDS);
+
+            if (updateFields.cf !== undefined) {
+              body.cf = parseCustomFields(updateFields.cf);
+            }
+
+            const options = {
+              method: 'PATCH',
+              headers: { orgId },
+              uri: `${baseUrl}/accounts/${encodeURIComponent(accountId)}`,
+              body,
+              json: true,
+            };
+
+            const response = await this.helpers.requestOAuth2.call(
+              this,
+              'zohoDeskOAuth2Api',
+              options,
+            );
+
+            returnData.push({
+              json: response,
+              pairedItem: { item: i },
+            });
+          }
+
+          if (operation === 'delete') {
+            const accountId = this.getNodeParameter('accountId', i) as string;
+            isValidZohoDeskId(accountId, 'Account ID');
+
+            const options = {
+              method: 'POST',
+              headers: { orgId },
+              uri: `${baseUrl}/accounts/moveToTrash`,
+              body: { accountIds: [accountId] },
+              json: true,
+            };
+
+            await this.helpers.requestOAuth2.call(this, 'zohoDeskOAuth2Api', options);
+
+            returnData.push({
+              json: { success: true, accountId },
               pairedItem: { item: i },
             });
           }
