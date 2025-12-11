@@ -1,8 +1,8 @@
-# n8n-nodes-zoho-desk-extended
+# n8n-nodes-zoho-desk
 
 Production-ready n8n community node for integrating with [Zoho Desk](https://www.zoho.com/desk/) API. Manage support tickets, contacts, and accounts with comprehensive field support, dynamic resource loading, and automatic contact creation.
 
-[![npm version](https://badge.fury.io/js/n8n-nodes-zoho-desk-extended.svg)](https://www.npmjs.com/package/n8n-nodes-zoho-desk-extended)
+[![npm version](https://badge.fury.io/js/n8n-nodes-zoho-desk.svg)](https://www.npmjs.com/package/n8n-nodes-zoho-desk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
@@ -29,13 +29,13 @@ Production-ready n8n community node for integrating with [Zoho Desk](https://www
 ### Community Node (Recommended)
 
 1. Go to **Settings** > **Community Nodes** in n8n
-2. Search for `n8n-nodes-zoho-desk-extended`
+2. Search for `n8n-nodes-zoho-desk`
 3. Click **Install**
 
 ### Manual Installation
 
 ```bash
-npm install n8n-nodes-zoho-desk-extended
+npm install n8n-nodes-zoho-desk
 ```
 
 ## Setup
@@ -336,4 +336,4 @@ If you encounter any issues or have questions:
 - [n8n Documentation](https://docs.n8n.io/)
 - [n8n Community Nodes](https://docs.n8n.io/integrations/community-nodes/)
 - [GitHub Repository](https://github.com/ron137/zoho-desk-n8n-integration)
-- [npm Package](https://www.npmjs.com/package/n8n-nodes-zoho-desk-extended)
+- [npm Package](https://www.npmjs.com/package/n8n-nodes-zoho-desk)
