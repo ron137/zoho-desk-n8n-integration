@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-zoho-desk",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "n8n community node for Zoho Desk API integration - Tickets, Contacts, and Accounts management",
   "keywords": [
     "n8n-community-node-package",
@@ -12,14 +12,14 @@
     "crm"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/ron137/zoho-desk-n8n-integration",
+  "homepage": "https://github.com/ron137/n8n-nodes-zoho-desk",
   "author": {
     "name": "Ron",
     "email": "rons137@gmail.com"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ron137/zoho-desk-n8n-integration.git"
+    "url": "git+https://github.com/ron137/n8n-nodes-zoho-desk.git"
   },
   "publishConfig": {
     "access": "public"

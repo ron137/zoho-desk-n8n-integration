@@ -270,7 +270,7 @@ The node detects rate limiting (HTTP 429) and provides clear error messages.
 
 ```bash
 # Clone the repository
-git clone https://github.com/ron137/zoho-desk-n8n-integration.git
+git clone https://github.com/ron137/n8n-nodes-zoho-desk.git
 
 # Install dependencies
 npm install
@@ -312,7 +312,7 @@ MIT
 ## Support
 
 If you encounter any issues or have questions:
-1. Check the [Issues](https://github.com/ron137/zoho-desk-n8n-integration/issues) page
+1. Check the [Issues](https://github.com/ron137/n8n-nodes-zoho-desk/issues) page
 2. Create a new issue if your problem isn't already listed
 
 ## Changelog
@@ -335,5 +335,5 @@ If you encounter any issues or have questions:
 - [Zoho Desk API Documentation](https://desk.zoho.com/DeskAPIDocument)
 - [n8n Documentation](https://docs.n8n.io/)
 - [n8n Community Nodes](https://docs.n8n.io/integrations/community-nodes/)
-- [GitHub Repository](https://github.com/ron137/zoho-desk-n8n-integration)
+- [GitHub Repository](https://github.com/ron137/n8n-nodes-zoho-desk)
 - [npm Package](https://www.npmjs.com/package/n8n-nodes-zoho-desk)
