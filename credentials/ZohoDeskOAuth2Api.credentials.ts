@@ -9,7 +9,7 @@ export class ZohoDeskOAuth2Api implements ICredentialType {
   name = 'zohoDeskOAuth2Api';
   extends = ['oAuth2Api'];
   displayName = 'Zoho Desk OAuth2 API';
-  documentationUrl = 'https://desk.zoho.com/support/APIDocument#OAuthtoken';
+  documentationUrl = 'https://www.zoho.com/apptics/resources/api/oauthtoken.html';
   properties: INodeProperties[] = [
     {
       displayName: 'Grant Type',
