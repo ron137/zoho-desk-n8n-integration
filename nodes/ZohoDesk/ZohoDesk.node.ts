@@ -626,7 +626,7 @@ export class ZohoDesk implements INodeType {
   description: INodeTypeDescription = {
     displayName: 'Zoho Desk',
     name: 'zohoDesk',
-    icon: 'file:zohoDesk.svg',
+    icon: 'file:zohoDesk.png',
     group: ['transform'],
     version: 1,
     subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',

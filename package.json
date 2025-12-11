@@ -30,7 +30,7 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc && npm run copy:icons",
-    "copy:icons": "cp nodes/ZohoDesk/*.svg dist/nodes/ZohoDesk/ 2>/dev/null || true",
+    "copy:icons": "cp nodes/ZohoDesk/*.svg nodes/ZohoDesk/*.png dist/nodes/ZohoDesk/ 2>/dev/null || true",
     "dev": "tsc --watch",
     "format": "prettier nodes credentials --write",
     "lint": "eslint 'nodes/**/*.ts' 'credentials/**/*.ts'",

@@ -31,7 +31,7 @@ export class ZohoDeskTrigger implements INodeType {
   description: INodeTypeDescription = {
     displayName: 'Zoho Desk Trigger',
     name: 'zohoDeskTrigger',
-    icon: 'file:zohoDesk.svg',
+    icon: 'file:zohoDesk.png',
     group: ['trigger'],
     version: 1,
     subtitle: '={{$parameter["event"]}}',
