@@ -96,6 +96,7 @@ interface ZohoTicket {
   departmentId: string;
   status: string;
   priority?: string;
+  isArchived?: boolean;
 }
 
 interface ZohoContact {
@@ -244,6 +245,24 @@ describe('Zoho Desk API Integration Tests', () => {
       expect(response).toBeDefined();
       expect(response.data).toBeDefined();
       expect(Array.isArray(response.data)).toBe(true);
+    });
+
+    it('should list archived tickets', async () => {
+      expect(testDepartmentId).toBeTruthy();
+
+      const response = await zohoRequest<ZohoListResponse<ZohoTicket>>({
+        method: 'GET',
+        endpoint: '/tickets/archivedTickets',
+        qs: { limit: 10, departmentId: testDepartmentId },
+      });
+
+      expect(response).toBeDefined();
+      expect(response.data).toBeDefined();
+      expect(Array.isArray(response.data)).toBe(true);
+      // Archived tickets should have isArchived: true (if any exist)
+      if (response.data.length > 0) {
+        expect(response.data[0].isArchived).toBe(true);
+      }
     });
 
     it('should update a ticket', async () => {
